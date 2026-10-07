@@ -28,6 +28,13 @@
     "/v1/applications": {
       "post": {
         "operationId": "createApplication",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:create"
+            ]
+          }
+        ],
         "tags": [
           "applications"
         ],
@@ -44,7 +51,7 @@
         },
         "responses": {
           "200": {
-            "description": "An Application already existed for this partnerReference with the same customer and amount.",
+            "description": "An Application already exists for this partnerReference and customer email. A changed amount or breakdown adds an Amount Revision (only while the application is created or in progress; otherwise the answer is 409 invalid_state). A changed name or property address is ignored. Each call returns a fresh handoffUrl.",
             "content": {
               "application/json": {
                 "schema": {
@@ -79,6 +86,13 @@
       },
       "get": {
         "operationId": "findApplicationByPartnerReference",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:read"
+            ]
+          }
+        ],
         "summary": "Find an Application by the partner reference.",
         "tags": [
           "applications"
@@ -121,6 +135,13 @@
     "/v1/applications/{applicationId}": {
       "get": {
         "operationId": "getApplication",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:read"
+            ]
+          }
+        ],
         "summary": "Get an Application.",
         "tags": [
           "applications"
@@ -156,6 +177,13 @@
     "/v1/applications/{applicationId}/amendments": {
       "post": {
         "operationId": "amendApplication",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:amend"
+            ]
+          }
+        ],
         "summary": "Add an Amount Revision.",
         "tags": [
           "applications"
@@ -207,6 +235,13 @@
     "/v1/applications/{applicationId}/fulfil": {
       "post": {
         "operationId": "fulfilApplication",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:amend"
+            ]
+          }
+        ],
         "summary": "Confirm delivery.",
         "tags": [
           "applications"
@@ -282,7 +317,7 @@
       "partnerApiKey": {
         "type": "http",
         "scheme": "bearer",
-        "description": "Partner API key, scoped to applications:create|read|amend."
+        "description": "A partner API key as a bearer token. Each operation names the scope it needs: applications:create, applications:read or applications:amend."
       }
     },
     "schemas": {
@@ -642,7 +677,7 @@
         }
       },
       "Conflict": {
-        "description": "Conflict, e.g. email_conflict or invalid_state.",
+        "description": "email_conflict when the partnerReference belongs to a different customer email; invalid_state when the amount changes once the application is past created or in progress.",
         "content": {
           "application/problem+json": {
             "schema": {
