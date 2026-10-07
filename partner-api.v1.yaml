@@ -1,0 +1,450 @@
+openapi: 3.1.0
+info:
+  title: Partner API
+  version: 1.0.0
+  license:
+    name: Proprietary
+    identifier: LicenseRef-Proprietary
+servers:
+  - url: https://api.example.invalid
+security:
+  - partnerApiKey: []
+tags:
+  - name: applications
+    description: Applications.
+paths:
+  /v1/applications:
+    post:
+      operationId: createApplication
+      tags:
+        - applications
+      summary: Create an Application, idempotent on partnerReference.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateApplicationRequest'
+      responses:
+        '200':
+          description: An Application already existed for this partnerReference with the same customer and amount.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedApplication'
+        '201':
+          description: Created.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/CreatedApplication'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+    get:
+      operationId: findApplicationByPartnerReference
+      summary: Find an Application by the partner reference.
+      tags:
+        - applications
+      parameters:
+        - name: partnerReference
+          in: query
+          required: true
+          schema:
+            type: string
+            minLength: 1
+            maxLength: 128
+      responses:
+        '200':
+          description: The Application with this partnerReference.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/applications/{applicationId}:
+    get:
+      operationId: getApplication
+      summary: Get an Application.
+      tags:
+        - applications
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200':
+          description: The Application.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+  /v1/applications/{applicationId}/amendments:
+    post:
+      operationId: amendApplication
+      summary: Add an Amount Revision.
+      tags:
+        - applications
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/Amount'
+      responses:
+        '201':
+          description: A new Amount Revision was added.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+        '422':
+          $ref: '#/components/responses/Unprocessable'
+  /v1/applications/{applicationId}/fulfil:
+    post:
+      operationId: fulfilApplication
+      summary: Confirm delivery.
+      tags:
+        - applications
+      parameters:
+        - $ref: '#/components/parameters/ApplicationId'
+      responses:
+        '200':
+          description: Delivery confirmed.
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Application'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          $ref: '#/components/responses/Conflict'
+webhooks:
+  applicationEvent:
+    post:
+      operationId: applicationEventWebhook
+      summary: Sent to the partner's webhook URL. HMAC-signed.
+      security: []
+      parameters:
+        - name: X-Signature
+          in: header
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/WebhookEvent'
+      responses:
+        2XX:
+          description: Acknowledged.
+components:
+  securitySchemes:
+    partnerApiKey:
+      type: http
+      scheme: bearer
+      description: Partner API key, scoped to applications:create|read|amend.
+  schemas:
+    Status:
+      title: ApplicationStatus
+      type: string
+      enum:
+        - created
+        - in_progress
+        - submitted
+        - approved
+        - declined
+        - referred
+        - signed
+        - fulfilled
+        - paid_out
+        - withdrawn
+        - cancelled
+        - expired
+    Customer:
+      title: Customer
+      type: object
+      required:
+        - name
+        - email
+      properties:
+        name:
+          type: string
+          minLength: 1
+        email:
+          type: string
+          format: email
+    Amount:
+      title: Amount
+      type: object
+      required:
+        - totalPence
+        - breakdown
+      properties:
+        totalPence:
+          type: integer
+          minimum: 1
+          description: Integer pence.
+        breakdown:
+          type: array
+          minItems: 1
+          items:
+            type: object
+            required:
+              - label
+              - pence
+            properties:
+              label:
+                type: string
+                minLength: 1
+              pence:
+                type: integer
+                minimum: 0
+    Application:
+      title: Application
+      type: object
+      required:
+        - id
+        - partnerReference
+        - status
+        - customer
+        - amount
+        - createdAt
+        - updatedAt
+        - fulfilledAt
+      properties:
+        id:
+          type: string
+          format: uuid
+        partnerReference:
+          type: string
+        status:
+          $ref: '#/components/schemas/Status'
+        customer:
+          $ref: '#/components/schemas/Customer'
+        amount:
+          $ref: '#/components/schemas/Amount'
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        fulfilledAt:
+          type:
+            - string
+            - 'null'
+          format: date-time
+    Problem:
+      title: Problem
+      type: object
+      required:
+        - type
+        - title
+        - status
+        - code
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum:
+            - bad_request
+            - unauthorized
+            - not_found
+            - email_conflict
+            - invalid_state
+            - product_unavailable
+            - amount_out_of_bounds
+    Address:
+      title: Address
+      type: object
+      required:
+        - line1
+        - town
+        - postcode
+      properties:
+        line1:
+          type: string
+        line2:
+          type:
+            - string
+            - 'null'
+        town:
+          type: string
+        postcode:
+          type: string
+    CreateApplicationRequest:
+      title: CreateApplicationRequest
+      type: object
+      required:
+        - partnerReference
+        - customer
+        - propertyAddress
+        - amount
+      properties:
+        partnerReference:
+          type: string
+          minLength: 1
+          maxLength: 128
+        customer:
+          $ref: '#/components/schemas/Customer'
+        propertyAddress:
+          $ref: '#/components/schemas/Address'
+        amount:
+          $ref: '#/components/schemas/Amount'
+    CreatedApplication:
+      title: CreatedApplication
+      allOf:
+        - $ref: '#/components/schemas/Application'
+        - type: object
+          required:
+            - handoffUrl
+          properties:
+            handoffUrl:
+              type: string
+              format: uri
+    StatusChangedEvent:
+      title: StatusChangedEvent
+      type: object
+      required:
+        - id
+        - type
+        - occurredAt
+        - applicationId
+        - partnerReference
+        - from
+        - to
+      properties:
+        id:
+          type: string
+          format: uuid
+          description: Stable event id; replays reuse it.
+        type:
+          type: string
+          const: application.status_changed
+        occurredAt:
+          type: string
+          format: date-time
+        applicationId:
+          type: string
+          format: uuid
+        partnerReference:
+          type: string
+        from:
+          $ref: '#/components/schemas/Status'
+        to:
+          $ref: '#/components/schemas/Status'
+    AmendedEvent:
+      title: AmendedEvent
+      type: object
+      required:
+        - id
+        - type
+        - occurredAt
+        - applicationId
+        - partnerReference
+        - amount
+      properties:
+        id:
+          type: string
+          format: uuid
+        type:
+          type: string
+          const: application.amended
+        occurredAt:
+          type: string
+          format: date-time
+        applicationId:
+          type: string
+          format: uuid
+        partnerReference:
+          type: string
+        amount:
+          $ref: '#/components/schemas/Amount'
+    WebhookEvent:
+      title: WebhookEvent
+      oneOf:
+        - $ref: '#/components/schemas/StatusChangedEvent'
+        - $ref: '#/components/schemas/AmendedEvent'
+      discriminator:
+        propertyName: type
+        mapping:
+          application.status_changed: '#/components/schemas/StatusChangedEvent'
+          application.amended: '#/components/schemas/AmendedEvent'
+  responses:
+    BadRequest:
+      description: The request does not match the contract.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unauthorized:
+      description: Missing or invalid partner API key.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    NotFound:
+      description: Not found.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Conflict:
+      description: Conflict, e.g. email_conflict or invalid_state.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+    Unprocessable:
+      description: product_unavailable or amount_out_of_bounds.
+      content:
+        application/problem+json:
+          schema:
+            $ref: '#/components/schemas/Problem'
+  parameters:
+    ApplicationId:
+      name: applicationId
+      in: path
+      required: true
+      schema:
+        type: string
+        format: uuid
