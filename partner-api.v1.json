@@ -25,6 +25,64 @@
     }
   ],
   "paths": {
+    "/v1/applications/{applicationId}/amendments": {
+      "post": {
+        "operationId": "amendApplication",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:amend"
+            ]
+          }
+        ],
+        "summary": "Add an Amount Revision.",
+        "tags": [
+          "applications"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApplicationId"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/Amount"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "A new Amount Revision was added.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          },
+          "409": {
+            "$ref": "#/components/responses/Conflict"
+          },
+          "422": {
+            "$ref": "#/components/responses/Unprocessable"
+          }
+        }
+      }
+    },
     "/v1/applications": {
       "post": {
         "operationId": "createApplication",
@@ -99,14 +157,14 @@
         ],
         "parameters": [
           {
-            "name": "partnerReference",
-            "in": "query",
-            "required": true,
             "schema": {
               "type": "string",
               "minLength": 1,
               "maxLength": 128
-            }
+            },
+            "required": true,
+            "name": "partnerReference",
+            "in": "query"
           }
         ],
         "responses": {
@@ -128,106 +186,6 @@
           },
           "404": {
             "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/v1/applications/{applicationId}": {
-      "get": {
-        "operationId": "getApplication",
-        "security": [
-          {
-            "partnerApiKey": [
-              "applications:read"
-            ]
-          }
-        ],
-        "summary": "Get an Application.",
-        "tags": [
-          "applications"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ApplicationId"
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "The Application.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Application"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          }
-        }
-      }
-    },
-    "/v1/applications/{applicationId}/amendments": {
-      "post": {
-        "operationId": "amendApplication",
-        "security": [
-          {
-            "partnerApiKey": [
-              "applications:amend"
-            ]
-          }
-        ],
-        "summary": "Add an Amount Revision.",
-        "tags": [
-          "applications"
-        ],
-        "parameters": [
-          {
-            "$ref": "#/components/parameters/ApplicationId"
-          }
-        ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/Amount"
-              }
-            }
-          }
-        },
-        "responses": {
-          "201": {
-            "description": "A new Amount Revision was added.",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Application"
-                }
-              }
-            }
-          },
-          "400": {
-            "$ref": "#/components/responses/BadRequest"
-          },
-          "401": {
-            "$ref": "#/components/responses/Unauthorized"
-          },
-          "404": {
-            "$ref": "#/components/responses/NotFound"
-          },
-          "409": {
-            "$ref": "#/components/responses/Conflict"
-          },
-          "422": {
-            "$ref": "#/components/responses/Unprocessable"
           }
         }
       }
@@ -276,6 +234,48 @@
           }
         }
       }
+    },
+    "/v1/applications/{applicationId}": {
+      "get": {
+        "operationId": "getApplication",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:read"
+            ]
+          }
+        ],
+        "summary": "Get an Application.",
+        "tags": [
+          "applications"
+        ],
+        "parameters": [
+          {
+            "$ref": "#/components/parameters/ApplicationId"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "The Application.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Application"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/BadRequest"
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "404": {
+            "$ref": "#/components/responses/NotFound"
+          }
+        }
+      }
     }
   },
   "webhooks": {
@@ -286,12 +286,12 @@
         "security": [],
         "parameters": [
           {
-            "name": "X-Signature",
-            "in": "header",
-            "required": true,
             "schema": {
               "type": "string"
-            }
+            },
+            "required": true,
+            "name": "X-Signature",
+            "in": "header"
           }
         ],
         "requestBody": {
@@ -321,9 +321,68 @@
       }
     },
     "schemas": {
+      "WebhookEvent": {
+        "oneOf": [
+          {
+            "$ref": "#/components/schemas/StatusChangedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/AmendedEvent"
+          }
+        ],
+        "discriminator": {
+          "propertyName": "type",
+          "mapping": {
+            "application.status_changed": "#/components/schemas/StatusChangedEvent",
+            "application.amended": "#/components/schemas/AmendedEvent"
+          }
+        },
+        "title": "WebhookEvent"
+      },
+      "StatusChangedEvent": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Stable event id; replays reuse it."
+          },
+          "type": {
+            "type": "string",
+            "const": "application.status_changed"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "partnerReference": {
+            "type": "string"
+          },
+          "from": {
+            "$ref": "#/components/schemas/Status"
+          },
+          "to": {
+            "$ref": "#/components/schemas/Status"
+          }
+        },
+        "required": [
+          "id",
+          "type",
+          "occurredAt",
+          "applicationId",
+          "partnerReference",
+          "from",
+          "to"
+        ],
+        "title": "StatusChangedEvent"
+      },
       "Status": {
-        "title": "ApplicationStatus",
         "type": "string",
+        "title": "ApplicationStatus",
         "enum": [
           "created",
           "in_progress",
@@ -339,31 +398,44 @@
           "expired"
         ]
       },
-      "Customer": {
-        "title": "Customer",
+      "AmendedEvent": {
         "type": "object",
-        "required": [
-          "name",
-          "email"
-        ],
         "properties": {
-          "name": {
+          "id": {
             "type": "string",
-            "minLength": 1
+            "format": "uuid"
           },
-          "email": {
+          "type": {
             "type": "string",
-            "format": "email"
+            "const": "application.amended"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time"
+          },
+          "applicationId": {
+            "type": "string",
+            "format": "uuid"
+          },
+          "partnerReference": {
+            "type": "string"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
           }
-        }
+        },
+        "required": [
+          "id",
+          "type",
+          "occurredAt",
+          "applicationId",
+          "partnerReference",
+          "amount"
+        ],
+        "title": "AmendedEvent"
       },
       "Amount": {
-        "title": "Amount",
         "type": "object",
-        "required": [
-          "totalPence",
-          "breakdown"
-        ],
         "properties": {
           "totalPence": {
             "type": "integer",
@@ -372,13 +444,8 @@
           },
           "breakdown": {
             "type": "array",
-            "minItems": 1,
             "items": {
               "type": "object",
-              "required": [
-                "label",
-                "pence"
-              ],
               "properties": {
                 "label": {
                   "type": "string",
@@ -388,24 +455,23 @@
                   "type": "integer",
                   "minimum": 0
                 }
-              }
-            }
+              },
+              "required": [
+                "label",
+                "pence"
+              ]
+            },
+            "minItems": 1
           }
-        }
+        },
+        "required": [
+          "totalPence",
+          "breakdown"
+        ],
+        "title": "Amount"
       },
       "Application": {
-        "title": "Application",
         "type": "object",
-        "required": [
-          "id",
-          "partnerReference",
-          "status",
-          "customer",
-          "amount",
-          "createdAt",
-          "updatedAt",
-          "fulfilledAt"
-        ],
         "properties": {
           "id": {
             "type": "string",
@@ -438,17 +504,39 @@
             ],
             "format": "date-time"
           }
-        }
+        },
+        "required": [
+          "id",
+          "partnerReference",
+          "status",
+          "customer",
+          "amount",
+          "createdAt",
+          "updatedAt",
+          "fulfilledAt"
+        ],
+        "title": "Application"
+      },
+      "Customer": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "minLength": 1
+          },
+          "email": {
+            "type": "string",
+            "format": "email"
+          }
+        },
+        "required": [
+          "name",
+          "email"
+        ],
+        "title": "Customer"
       },
       "Problem": {
-        "title": "Problem",
         "type": "object",
-        "required": [
-          "type",
-          "title",
-          "status",
-          "code"
-        ],
         "properties": {
           "type": {
             "type": "string",
@@ -475,16 +563,63 @@
               "amount_out_of_bounds"
             ]
           }
-        }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "title": "Problem"
+      },
+      "CreatedApplication": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Application"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "handoffUrl": {
+                "type": "string",
+                "format": "uri"
+              }
+            },
+            "required": [
+              "handoffUrl"
+            ]
+          }
+        ],
+        "title": "CreatedApplication"
+      },
+      "CreateApplicationRequest": {
+        "type": "object",
+        "properties": {
+          "partnerReference": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 128
+          },
+          "customer": {
+            "$ref": "#/components/schemas/Customer"
+          },
+          "propertyAddress": {
+            "$ref": "#/components/schemas/Address"
+          },
+          "amount": {
+            "$ref": "#/components/schemas/Amount"
+          }
+        },
+        "required": [
+          "partnerReference",
+          "customer",
+          "propertyAddress",
+          "amount"
+        ],
+        "title": "CreateApplicationRequest"
       },
       "Address": {
-        "title": "Address",
         "type": "object",
-        "required": [
-          "line1",
-          "town",
-          "postcode"
-        ],
         "properties": {
           "line1": {
             "type": "string"
@@ -501,148 +636,24 @@
           "postcode": {
             "type": "string"
           }
-        }
-      },
-      "CreateApplicationRequest": {
-        "title": "CreateApplicationRequest",
-        "type": "object",
+        },
         "required": [
-          "partnerReference",
-          "customer",
-          "propertyAddress",
-          "amount"
+          "line1",
+          "town",
+          "postcode"
         ],
-        "properties": {
-          "partnerReference": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          },
-          "customer": {
-            "$ref": "#/components/schemas/Customer"
-          },
-          "propertyAddress": {
-            "$ref": "#/components/schemas/Address"
-          },
-          "amount": {
-            "$ref": "#/components/schemas/Amount"
-          }
-        }
-      },
-      "CreatedApplication": {
-        "title": "CreatedApplication",
-        "allOf": [
-          {
-            "$ref": "#/components/schemas/Application"
-          },
-          {
-            "type": "object",
-            "required": [
-              "handoffUrl"
-            ],
-            "properties": {
-              "handoffUrl": {
-                "type": "string",
-                "format": "uri"
-              }
-            }
-          }
-        ]
-      },
-      "StatusChangedEvent": {
-        "title": "StatusChangedEvent",
-        "type": "object",
-        "required": [
-          "id",
-          "type",
-          "occurredAt",
-          "applicationId",
-          "partnerReference",
-          "from",
-          "to"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid",
-            "description": "Stable event id; replays reuse it."
-          },
-          "type": {
-            "type": "string",
-            "const": "application.status_changed"
-          },
-          "occurredAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "applicationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "partnerReference": {
-            "type": "string"
-          },
-          "from": {
-            "$ref": "#/components/schemas/Status"
-          },
-          "to": {
-            "$ref": "#/components/schemas/Status"
-          }
-        }
-      },
-      "AmendedEvent": {
-        "title": "AmendedEvent",
-        "type": "object",
-        "required": [
-          "id",
-          "type",
-          "occurredAt",
-          "applicationId",
-          "partnerReference",
-          "amount"
-        ],
-        "properties": {
-          "id": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "type": {
-            "type": "string",
-            "const": "application.amended"
-          },
-          "occurredAt": {
-            "type": "string",
-            "format": "date-time"
-          },
-          "applicationId": {
-            "type": "string",
-            "format": "uuid"
-          },
-          "partnerReference": {
-            "type": "string"
-          },
-          "amount": {
-            "$ref": "#/components/schemas/Amount"
-          }
-        }
-      },
-      "WebhookEvent": {
-        "title": "WebhookEvent",
-        "oneOf": [
-          {
-            "$ref": "#/components/schemas/StatusChangedEvent"
-          },
-          {
-            "$ref": "#/components/schemas/AmendedEvent"
-          }
-        ],
-        "discriminator": {
-          "propertyName": "type",
-          "mapping": {
-            "application.status_changed": "#/components/schemas/StatusChangedEvent",
-            "application.amended": "#/components/schemas/AmendedEvent"
-          }
-        }
+        "title": "Address"
+      }
+    },
+    "parameters": {
+      "ApplicationId": {
+        "schema": {
+          "type": "string",
+          "format": "uuid"
+        },
+        "required": true,
+        "name": "applicationId",
+        "in": "path"
       }
     },
     "responses": {
@@ -694,17 +705,6 @@
               "$ref": "#/components/schemas/Problem"
             }
           }
-        }
-      }
-    },
-    "parameters": {
-      "ApplicationId": {
-        "name": "applicationId",
-        "in": "path",
-        "required": true,
-        "schema": {
-          "type": "string",
-          "format": "uuid"
         }
       }
     }
