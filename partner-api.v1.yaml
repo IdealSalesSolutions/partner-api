@@ -21,7 +21,10 @@ paths:
         - partnerApiKey:
             - applications:amend
       summary: Add an Amount Revision.
-      description: "Not yet available: this operation currently answers 501."
+      description: "Allowed before signing: created, in progress, submitted or approved. From submitted or
+        approved, an amend moves the application back to in_progress and withdraws any submission
+        the lender holds, so the customer is asked again. From any other status, an amend is
+        refused. Not yet available: this operation currently answers 501."
       tags:
         - applications
       parameters:
@@ -46,7 +49,11 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: invalid_state when the application is not created, in progress, submitted or approved.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
         "422":
           $ref: "#/components/responses/Unprocessable"
         "501":
@@ -73,9 +80,11 @@ paths:
       responses:
         "200":
           description: An Application already exists for this partnerReference and customer email. A changed
-            amount or breakdown adds an Amount Revision (only while the application is created or in
-            progress; otherwise the answer is 409 invalid_state). A changed name or property address
-            is ignored. Each call returns a fresh handoffUrl.
+            amount or breakdown is an amend and adds an Amount Revision, allowed only while the
+            application is created, in progress, submitted or approved (otherwise 409
+            invalid_state). From submitted or approved, it moves the application back to in_progress
+            and withdraws any submission the lender holds, so the customer is asked again. A changed
+            name or property address is ignored. Each call returns a fresh handoffUrl.
           content:
             application/json:
               schema:
@@ -129,18 +138,46 @@ paths:
       security:
         - partnerApiKey:
             - applications:amend
-      summary: Confirm fulfilment.
-      description: "Confirms the customer has received what they financed. Fulfilment is the step that
-        allows the finance to be paid out. Call this only if you and Ideal have agreed that
-        fulfilment waits for your confirmation; otherwise it happens automatically when the customer
-        signs. Not yet available: this operation currently answers 501."
+      summary: Request fulfilment.
+      description: "Tells Ideal the customer has received what they financed, which is what allows the
+        finance to be paid out. Calling this is the only way to start fulfilment: nothing fulfils an
+        application automatically. The request is accepted with 202 and the application stays signed
+        until the lender acknowledges it; it then moves to fulfilled, and your webhook receives
+        application.status_changed from signed to fulfilled. Only an accepted request (202) binds
+        its Idempotency-Key: a retry with the same key then always answers that original 202,
+        whatever the application's state is now. A refused request (404 or 409) stores nothing, so
+        the same key can be used again once the application is ready, and that call gets a fresh
+        answer. While a request is pending, another call with a new key answers 202 with the same
+        state and starts nothing new. Not yet available: this operation currently answers 501."
       tags:
         - applications
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+            description: "A key you choose for this fulfilment request. Only an accepted request (202) binds the
+              key: a retry with the same key then answers that original 202 again, whatever the
+              application's state is now, and starts nothing new. A refused request (404 or 409)
+              stores nothing, so the same key can be used again once the application is ready and
+              gets a fresh answer. A key bound by a 202 for a different application of yours is
+              refused with 409 idempotency_key_conflict."
+          required: true
+          description: "A key you choose for this fulfilment request. Only an accepted request (202) binds the
+            key: a retry with the same key then answers that original 202 again, whatever the
+            application's state is now, and starts nothing new. A refused request (404 or 409)
+            stores nothing, so the same key can be used again once the application is ready and gets
+            a fresh answer. A key bound by a 202 for a different application of yours is refused
+            with 409 idempotency_key_conflict."
+          name: Idempotency-Key
+          in: header
       responses:
-        "200":
-          description: Fulfilment confirmed.
+        "202":
+          description: "Fulfilment requested. The application is still signed; it becomes fulfilled when the
+            lender acknowledges, signalled by your webhook. This response binds the Idempotency-Key:
+            a retry with the same key gets this original response again, even once the application
+            has moved on."
           content:
             application/json:
               schema:
@@ -152,11 +189,14 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          description: The application isn't waiting for fulfilment confirmation.
+          description: "invalid_state when the application isn't signed and no earlier 202 for it bound the
+            Idempotency-Key; idempotency_key_conflict when the Idempotency-Key is bound by a 202 for
+            a different application of yours. A 409 stores nothing: the key stays unbound, and a
+            later call with it gets a fresh answer."
           content:
             application/problem+json:
               schema:
-                $ref: "#/components/schemas/Problem"
+                $ref: "#/components/schemas/FulfilConflictProblem"
         "501":
           description: Not yet available.
           content:
@@ -257,9 +297,13 @@ components:
         - from
         - to
       title: StatusChangedEvent
+      description: "Status can move backwards, always to in_progress: on an amend (from submitted or
+        approved), when Ideal returns a submitted application to the customer, and when an approved
+        offer lapses."
     Status:
       type: string
       title: ApplicationStatus
+      description: "referred is reserved: not sent today."
       enum:
         - created
         - in_progress
@@ -470,6 +514,29 @@ components:
         - town
         - postcode
       title: Address
+    FulfilConflictProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum:
+            - invalid_state
+            - idempotency_key_conflict
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: FulfilConflictProblem
   parameters:
     ApplicationId:
       schema:
@@ -499,7 +566,8 @@ components:
             $ref: "#/components/schemas/Problem"
     Conflict:
       description: email_conflict when the partnerReference belongs to a different customer email;
-        invalid_state when the amount changes once the application is past created or in progress.
+        invalid_state when the amount changes and the application is not created, in progress,
+        submitted or approved.
       content:
         application/problem+json:
           schema:
