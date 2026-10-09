@@ -21,6 +21,7 @@ paths:
         - partnerApiKey:
             - applications:amend
       summary: Add an Amount Revision.
+      description: "Not yet available: this operation currently answers 501."
       tags:
         - applications
       parameters:
@@ -48,6 +49,12 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
+        "501":
+          description: Not yet available.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedProblem"
   /v1/applications:
     post:
       operationId: createApplication
@@ -122,14 +129,18 @@ paths:
       security:
         - partnerApiKey:
             - applications:amend
-      summary: Confirm delivery.
+      summary: Confirm fulfilment.
+      description: "Confirms the customer has received what they financed. Fulfilment is the step that
+        allows the finance to be paid out. Call this only if you and Ideal have agreed that
+        fulfilment waits for your confirmation; otherwise it happens automatically when the customer
+        signs. Not yet available: this operation currently answers 501."
       tags:
         - applications
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
       responses:
         "200":
-          description: Delivery confirmed.
+          description: Fulfilment confirmed.
           content:
             application/json:
               schema:
@@ -141,7 +152,17 @@ paths:
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
-          $ref: "#/components/responses/Conflict"
+          description: The application isn't waiting for fulfilment confirmation.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "501":
+          description: Not yet available.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedProblem"
   /v1/applications/{applicationId}:
     get:
       operationId: getApplication
@@ -381,6 +402,26 @@ components:
         - status
         - code
       title: Problem
+    NotImplementedProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: number
+          const: 501
+        code:
+          type: string
+          const: not_implemented
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: NotImplementedProblem
     CreatedApplication:
       allOf:
         - $ref: "#/components/schemas/Application"
