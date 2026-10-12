@@ -14,54 +14,6 @@ tags:
   - name: applications
     description: Applications.
 paths:
-  /v1/applications/{applicationId}/amendments:
-    post:
-      operationId: amendApplication
-      security:
-        - partnerApiKey:
-            - applications:amend
-      summary: Add an Amount Revision.
-      description: "Allowed before signing: created, in progress, submitted or approved. From submitted or
-        approved, an amend moves the application back to in_progress and withdraws any submission
-        the lender holds, so the customer is asked again. From any other status, an amend is
-        refused. Not yet available: this operation currently answers 501."
-      tags:
-        - applications
-      parameters:
-        - $ref: "#/components/parameters/ApplicationId"
-      requestBody:
-        required: true
-        content:
-          application/json:
-            schema:
-              $ref: "#/components/schemas/Amount"
-      responses:
-        "201":
-          description: A new Amount Revision was added.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Application"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
-        "409":
-          description: invalid_state when the application is not created, in progress, submitted or approved.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/Problem"
-        "422":
-          $ref: "#/components/responses/Unprocessable"
-        "501":
-          description: Not yet available.
-          content:
-            application/problem+json:
-              schema:
-                $ref: "#/components/schemas/NotImplementedProblem"
   /v1/applications:
     post:
       operationId: createApplication
@@ -75,16 +27,74 @@ paths:
         required: true
         content:
           application/json:
+            example:
+              partnerReference: PB-104233
+              customer:
+                title: ms
+                firstName: Jane
+                lastName: Seller
+                email: jane.seller@example.com
+                mobile: "+447700900123"
+              property:
+                flat: Flat 2
+                buildingName: Mill House
+                buildingNumber: "22"
+                line1: Mill Lane
+                town: York
+                postcode: YO1 7HH
+                country: GB
+              quote:
+                items:
+                  - title: Listing fee
+                    description: |-
+                      Includes:
+                      - Online listing
+                      - For-sale board
+                    quantity: 100
+                    unitPrice:
+                      amount: 99900
+                      currency: GBP
+                    discount:
+                      type: percentage
+                      percentage: 1000
+                      amount:
+                        amount: 9990
+                        currency: GBP
+                    vatRate: 20%
+                    vat:
+                      amount: 17982
+                      currency: GBP
+                  - title: Photography (hours)
+                    quantity: 150
+                    unitPrice:
+                      amount: 6000
+                      currency: GBP
+                    vatRate: 20%
+                    vat:
+                      amount: 1800
+                      currency: GBP
+                  - title: Search fee
+                    unitPrice:
+                      amount: 2500
+                      currency: GBP
+                    vatRate: exempt
+                    vat:
+                      amount: 0
+                      currency: GBP
+                expectedTotal:
+                  amount: 121192
+                  currency: GBP
             schema:
               $ref: "#/components/schemas/CreateApplicationRequest"
       responses:
         "200":
-          description: An Application already exists for this partnerReference and customer email. A changed
-            amount or breakdown is an amend and adds an Amount Revision, allowed only while the
-            application is created, in progress, submitted or approved (otherwise 409
-            invalid_state). From submitted or approved, it moves the application back to in_progress
-            and withdraws any submission the lender holds, so the customer is asked again. A changed
-            name or property address is ignored. Each call returns a fresh handoffUrl.
+          description: "An Application already exists for this partnerReference and customer email. A changed
+            quote is an amend: it needs the applications:amend scope as well (otherwise 403
+            insufficient_scope), and replaces the Quote in force while the application is created or
+            in progress (otherwise 409 invalid_state). A changed title, name, mobile or property
+            updates what we hold. Each call returns a fresh handoffUrl. Once the application has
+            ended (declined, withdrawn, cancelled, expired or paid out) the call is refused with 409
+            invalid_state and no handoffUrl is issued."
           content:
             application/json:
               schema:
@@ -93,12 +103,106 @@ paths:
           description: Created.
           content:
             application/json:
+              example:
+                id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                partnerReference: PB-104233
+                status: created
+                customer:
+                  title: ms
+                  firstName: Jane
+                  lastName: Seller
+                  email: jane.seller@example.com
+                  mobile: "+447700900123"
+                property:
+                  flat: Flat 2
+                  buildingName: Mill House
+                  buildingNumber: "22"
+                  line1: Mill Lane
+                  town: York
+                  postcode: YO1 7HH
+                  country: GB
+                  line2: null
+                  line3: null
+                  county: null
+                  uprn: null
+                quote:
+                  items:
+                    - title: Listing fee
+                      description: |-
+                        Includes:
+                        - Online listing
+                        - For-sale board
+                      quantity: 100
+                      unitPrice:
+                        amount: 99900
+                        currency: GBP
+                      discount:
+                        type: percentage
+                        percentage: 1000
+                        amount:
+                          amount: 9990
+                          currency: GBP
+                      vatRate: 20%
+                      vat:
+                        amount: 17982
+                        currency: GBP
+                      net:
+                        amount: 89910
+                        currency: GBP
+                    - title: Photography (hours)
+                      quantity: 150
+                      unitPrice:
+                        amount: 6000
+                        currency: GBP
+                      vatRate: 20%
+                      vat:
+                        amount: 1800
+                        currency: GBP
+                      description: null
+                      discount: null
+                      net:
+                        amount: 9000
+                        currency: GBP
+                    - title: Search fee
+                      unitPrice:
+                        amount: 2500
+                        currency: GBP
+                      vatRate: exempt
+                      vat:
+                        amount: 0
+                        currency: GBP
+                      description: null
+                      quantity: 100
+                      discount: null
+                      net:
+                        amount: 2500
+                        currency: GBP
+                  total:
+                    amountVatExclusive:
+                      amount: 101410
+                      currency: GBP
+                    amountVat:
+                      amount: 19782
+                      currency: GBP
+                    amountVatInclusive:
+                      amount: 121192
+                      currency: GBP
+                  createdAt: 2026-10-12T09:30:00.000Z
+                timestamps:
+                  createdAt: 2026-10-12T09:30:00.000Z
+                  updatedAt: 2026-10-12T09:30:00.000Z
+                  statusChangedAt: 2026-10-12T09:30:00.000Z
+                  fulfilledAt: null
+                  paidOutAt: null
+                handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1J
               schema:
                 $ref: "#/components/schemas/CreatedApplication"
         "400":
           $ref: "#/components/responses/BadRequest"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
@@ -132,6 +236,116 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "404":
           $ref: "#/components/responses/NotFound"
+  /v1/applications/{applicationId}:
+    get:
+      operationId: getApplication
+      security:
+        - partnerApiKey:
+            - applications:read
+      summary: Get an Application.
+      tags:
+        - applications
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "200":
+          description: The Application.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "404":
+          $ref: "#/components/responses/NotFound"
+  /v1/applications/{applicationId}/amendments:
+    post:
+      operationId: amendApplication
+      security:
+        - partnerApiKey:
+            - applications:amend
+      summary: Replace the Quote.
+      description: "The quote sent replaces the Quote in force, whole. Allowed before signing: created, in
+        progress, submitted or approved. From submitted or approved, an amend moves the application
+        back to in_progress and withdraws any submission the lender holds, so the customer is asked
+        again; that is not yet available and answers 501. From any other status, an amend is
+        refused."
+      tags:
+        - applications
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AmendApplicationRequest"
+      responses:
+        "201":
+          description: The Quote was replaced.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Application"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: invalid_state when the application is not created, in progress, submitted or approved.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "422":
+          $ref: "#/components/responses/Unprocessable"
+        "501":
+          description: Not yet available.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/NotImplementedProblem"
+  /v1/applications/{applicationId}/handoff:
+    post:
+      operationId: issueHandoff
+      security:
+        - partnerApiKey:
+            - applications:create
+      summary: Get a fresh handoff URL for the customer.
+      description: "Each call issues a new single-use URL; earlier ones stay valid until they expire or
+        are used. Refused once the application has ended: declined, withdrawn, cancelled, expired or
+        paid out."
+      tags:
+        - applications
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "201":
+          description: A handoff URL was issued.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Handoff"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          $ref: "#/components/responses/Forbidden"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: invalid_state when the application has ended.
+          content:
+            application/problem+json:
+              schema:
+                $ref: "#/components/schemas/Problem"
   /v1/applications/{applicationId}/fulfil:
     post:
       operationId: fulfilApplication
@@ -203,40 +417,29 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/NotImplementedProblem"
-  /v1/applications/{applicationId}:
-    get:
-      operationId: getApplication
-      security:
-        - partnerApiKey:
-            - applications:read
-      summary: Get an Application.
-      tags:
-        - applications
-      parameters:
-        - $ref: "#/components/parameters/ApplicationId"
-      responses:
-        "200":
-          description: The Application.
-          content:
-            application/json:
-              schema:
-                $ref: "#/components/schemas/Application"
-        "400":
-          $ref: "#/components/responses/BadRequest"
-        "401":
-          $ref: "#/components/responses/Unauthorized"
-        "404":
-          $ref: "#/components/responses/NotFound"
 webhooks:
   applicationEvent:
     post:
       operationId: applicationEventWebhook
       summary: Sent to the partner's webhook URL. HMAC-signed.
+      description: "Ideal POSTs each event to the webhook URL your partner_admin registers in the partner
+        admin. Each delivery is signed: X-Signature is `t=<unix seconds>,v1=<hex>`, where v1 is
+        HMAC-SHA256 keyed with your webhook secret over the string `<t>.<raw body>`, in lowercase
+        hex. To verify: take the raw request bytes before parsing, compute the HMAC over t, a full
+        stop and those bytes, compare it with v1 in constant time, and reject the delivery if they
+        differ or if t is more than 5 minutes old. The webhook secret is your partner's own, shown
+        once to a partner_admin in the partner admin, and can be rotated there. A delivery is
+        retried with backoff until you answer 2XX, and every retry carries the same eventId."
       security: []
       parameters:
         - schema:
             type: string
+            description: t=<unix seconds>,v1=<HMAC-SHA256 of "<t>.<raw body>" keyed with your webhook secret,
+              lowercase hex>.
+            example: t=1760261400,v1=5d41402abc4b2a76b9719d911017c592ae2f1f6a0c3e0c9b0e3c1f1e2d3c4b5a
           required: true
+          description: t=<unix seconds>,v1=<HMAC-SHA256 of "<t>.<raw body>" keyed with your webhook secret,
+            lowercase hex>.
           name: X-Signature
           in: header
       requestBody:
@@ -269,10 +472,11 @@ components:
     StatusChangedEvent:
       type: object
       properties:
-        id:
+        eventId:
           type: string
           format: uuid
-          description: Stable event id; replays reuse it.
+          description: "This event's own id. It is the same on every retry and replay of the event: use it to
+            de-duplicate."
         type:
           type: string
           const: application.status_changed
@@ -282,6 +486,7 @@ components:
         applicationId:
           type: string
           format: uuid
+          description: Ideal's Application id, the id createApplication returned. Never a lender's reference.
         partnerReference:
           type: string
         from:
@@ -289,7 +494,7 @@ components:
         to:
           $ref: "#/components/schemas/Status"
       required:
-        - id
+        - eventId
         - type
         - occurredAt
         - applicationId
@@ -320,9 +525,11 @@ components:
     AmendedEvent:
       type: object
       properties:
-        id:
+        eventId:
           type: string
           format: uuid
+          description: "This event's own id. It is the same on every retry and replay of the event: use it to
+            de-duplicate."
         type:
           type: string
           const: application.amended
@@ -332,44 +539,68 @@ components:
         applicationId:
           type: string
           format: uuid
+          description: Ideal's Application id, the id createApplication returned. Never a lender's reference.
         partnerReference:
           type: string
-        amount:
-          $ref: "#/components/schemas/Amount"
+        quote:
+          type: object
+          properties:
+            total:
+              $ref: "#/components/schemas/QuoteTotal"
+          required:
+            - total
       required:
-        - id
+        - eventId
         - type
         - occurredAt
         - applicationId
         - partnerReference
-        - amount
+        - quote
       title: AmendedEvent
-    Amount:
+      description: The Quote was replaced. Its items are read with getApplication.
+    QuoteTotal:
       type: object
       properties:
-        totalPence:
-          type: integer
-          minimum: 1
-          description: Integer pence.
-        breakdown:
-          type: array
-          items:
-            type: object
-            properties:
-              label:
-                type: string
-                minLength: 1
-              pence:
-                type: integer
-                minimum: 0
-            required:
-              - label
-              - pence
-          minItems: 1
+        amountVatExclusive:
+          $ref: "#/components/schemas/Money"
+        amountVat:
+          $ref: "#/components/schemas/Money"
+        amountVatInclusive:
+          $ref: "#/components/schemas/Money"
       required:
-        - totalPence
-        - breakdown
-      title: Amount
+        - amountVatExclusive
+        - amountVat
+        - amountVatInclusive
+      title: QuoteTotal
+      description: Computed by Ideal from the items. The amount financed is amountVatInclusive.
+    Money:
+      type: object
+      properties:
+        amount:
+          type: integer
+          minimum: 0
+          maximum: 1000000000
+          description: "In pence (minor units): 2345 = £23.45; at least 0, at most 1000000000 (£10,000,000.00)."
+          example: 2345
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: ISO 4217. Only GBP is accepted for now; one currency per quote.
+      required:
+        - amount
+        - currency
+      title: Money
+    CreatedApplication:
+      allOf:
+        - $ref: "#/components/schemas/Application"
+        - type: object
+          properties:
+            handoffUrl:
+              type: string
+              format: uri
+          required:
+            - handoffUrl
+      title: CreatedApplication
     Application:
       type: object
       properties:
@@ -382,12 +613,228 @@ components:
           $ref: "#/components/schemas/Status"
         customer:
           $ref: "#/components/schemas/Customer"
+        property:
+          $ref: "#/components/schemas/Property"
+        quote:
+          $ref: "#/components/schemas/Quote"
+        timestamps:
+          $ref: "#/components/schemas/Timestamps"
+      required:
+        - id
+        - partnerReference
+        - status
+        - customer
+        - property
+        - quote
+        - timestamps
+      title: Application
+    Customer:
+      type: object
+      properties:
+        title:
+          $ref: "#/components/schemas/CustomerTitle"
+        firstName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        lastName:
+          type: string
+          minLength: 1
+          maxLength: 255
+        email:
+          type: string
+          format: email
+        mobile:
+          type: string
+          pattern: ^\+[1-9][0-9]{6,14}$
+          description: E.164. Only UK mobiles (+447 and nine digits) are accepted for now.
+          example: "+447700900123"
+      required:
+        - title
+        - firstName
+        - lastName
+        - email
+        - mobile
+      title: Customer
+    CustomerTitle:
+      type: string
+      title: CustomerTitle
+      enum:
+        - mr
+        - mrs
+        - miss
+        - ms
+        - mx
+        - dr
+        - other
+    Property:
+      type: object
+      properties:
+        flat:
+          type:
+            - string
+            - "null"
+        buildingName:
+          type:
+            - string
+            - "null"
+        buildingNumber:
+          type:
+            - string
+            - "null"
+        line1:
+          type: string
+        line2:
+          type:
+            - string
+            - "null"
+        line3:
+          type:
+            - string
+            - "null"
+        town:
+          type: string
+        county:
+          type:
+            - string
+            - "null"
+        postcode:
+          type: string
+        country:
+          type: string
+        uprn:
+          type:
+            - string
+            - "null"
+      required:
+        - flat
+        - buildingName
+        - buildingNumber
+        - line1
+        - line2
+        - line3
+        - town
+        - county
+        - postcode
+        - country
+        - uprn
+      title: Property
+    Quote:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteItem"
+        total:
+          $ref: "#/components/schemas/QuoteTotal"
+        createdAt:
+          type: string
+          format: date-time
+      required:
+        - items
+        - total
+        - createdAt
+      title: Quote
+      description: The Quote in force; replaced ones are not shown.
+    QuoteItem:
+      type: object
+      properties:
+        title:
+          type: string
+        description:
+          type:
+            - string
+            - "null"
+        quantity:
+          type: integer
+          description: "In hundredths: 100 = 1.00 (the default), 150 = 1.50, 2345 = 23.45. From 1 (0.01) to
+            100000 (1000.00)."
+          example: 150
+        unitPrice:
+          $ref: "#/components/schemas/Money"
+        discount:
+          anyOf:
+            - $ref: "#/components/schemas/Discount"
+            - type: "null"
+          description: null when the line has no discount.
+        vatRate:
+          type: string
+          description: A VatRate; more rates may be added.
+        vat:
+          $ref: "#/components/schemas/Money"
+        net:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+            - description: quantity × unitPrice less the discount, excluding VAT.
+      required:
+        - title
+        - description
+        - quantity
+        - unitPrice
+        - discount
+        - vatRate
+        - vat
+        - net
+      title: QuoteItem
+    Discount:
+      oneOf:
+        - $ref: "#/components/schemas/AmountDiscount"
+        - $ref: "#/components/schemas/PercentageDiscount"
+      title: Discount
+      description: On the line's quantity × unitPrice; at most that amount. Leave it out of a request for
+        no discount.
+      discriminator:
+        propertyName: type
+        mapping:
+          amount: "#/components/schemas/AmountDiscount"
+          percentage: "#/components/schemas/PercentageDiscount"
+    AmountDiscount:
+      type: object
+      properties:
+        type:
+          type: string
+          const: amount
         amount:
-          $ref: "#/components/schemas/Amount"
+          $ref: "#/components/schemas/Money"
+      required:
+        - type
+        - amount
+      title: Amount discount
+      description: A fixed amount off this line, in pence.
+    PercentageDiscount:
+      type: object
+      properties:
+        type:
+          type: string
+          const: percentage
+        percentage:
+          type: integer
+          minimum: 1
+          maximum: 10000
+          description: "In hundredths of a percent: 1000 = 10.00%. From 1 (0.01%) to 10000 (100.00%)."
+          example: 1000
+        amount:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+            - description: Your discount amount, checked within 1p of ours.
+      required:
+        - type
+        - percentage
+        - amount
+      title: Percentage discount
+      description: A percentage off this line, in hundredths of a percent, plus your amount for our 1p check.
+    Timestamps:
+      type: object
+      properties:
         createdAt:
           type: string
           format: date-time
         updatedAt:
+          type: string
+          format: date-time
+          description: When the status, the Quote or what you sent last changed.
+        statusChangedAt:
           type: string
           format: date-time
         fulfilledAt:
@@ -395,29 +842,19 @@ components:
             - string
             - "null"
           format: date-time
+        paidOutAt:
+          type:
+            - string
+            - "null"
+          format: date-time
       required:
-        - id
-        - partnerReference
-        - status
-        - customer
-        - amount
         - createdAt
         - updatedAt
+        - statusChangedAt
         - fulfilledAt
-      title: Application
-    Customer:
-      type: object
-      properties:
-        name:
-          type: string
-          minLength: 1
-        email:
-          type: string
-          format: email
-      required:
-        - name
-        - email
-      title: Customer
+        - paidOutAt
+      title: Timestamps
+      description: UTC, with milliseconds.
     Problem:
       type: object
       properties:
@@ -446,6 +883,207 @@ components:
         - status
         - code
       title: Problem
+    ScopeProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: number
+          const: 403
+        detail:
+          type: string
+        code:
+          type: string
+          const: insufficient_scope
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: ScopeProblem
+    QuoteProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum:
+            - product_unavailable
+            - amount_out_of_bounds
+            - currency_mismatch
+            - invalid_line_item
+            - total_out_of_range
+            - total_mismatch
+        totals:
+          allOf:
+            - $ref: "#/components/schemas/QuoteTotal"
+            - description: "With total_mismatch: our totals, computed from your items."
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: QuoteProblem
+    CreateApplicationRequest:
+      type: object
+      properties:
+        partnerReference:
+          type: string
+          minLength: 1
+          maxLength: 128
+        customer:
+          $ref: "#/components/schemas/Customer"
+        property:
+          $ref: "#/components/schemas/PropertyRequest"
+        quote:
+          $ref: "#/components/schemas/QuoteRequest"
+      required:
+        - partnerReference
+        - customer
+        - property
+        - quote
+      title: CreateApplicationRequest
+    PropertyRequest:
+      type: object
+      properties:
+        flat:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        buildingName:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        buildingNumber:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        line1:
+          type: string
+          minLength: 1
+          maxLength: 255
+        line2:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        line3:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        town:
+          type: string
+          minLength: 1
+          maxLength: 255
+        county:
+          type:
+            - string
+            - "null"
+          maxLength: 255
+        postcode:
+          type: string
+          minLength: 1
+          maxLength: 16
+          description: "A UK postcode, in any case and with or without its space: stored upper case with one
+            space."
+          example: YO1 7HH
+        country:
+          type: string
+          description: ISO 3166-1 alpha-2. Only GB is accepted for now.
+          example: GB
+          const: GB
+        uprn:
+          type:
+            - string
+            - "null"
+          pattern: ^[0-9]{1,12}$
+      required:
+        - line1
+        - town
+        - postcode
+        - country
+      title: PropertyRequest
+    QuoteRequest:
+      type: object
+      properties:
+        items:
+          type: array
+          items:
+            $ref: "#/components/schemas/QuoteItemRequest"
+          minItems: 1
+          maxItems: 50
+        expectedTotal:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+            - description: Your total including VAT. A difference from ours is refused with total_mismatch.
+      required:
+        - items
+        - expectedTotal
+      title: QuoteRequest
+    QuoteItemRequest:
+      type: object
+      properties:
+        title:
+          type: string
+          minLength: 1
+          maxLength: 255
+        description:
+          type:
+            - string
+            - "null"
+          maxLength: 4000
+          description: Plain text. Line breaks are kept and a line starting "- " shows as a bullet; nothing
+            else is interpreted.
+        quantity:
+          type: integer
+          minimum: 1
+          maximum: 100000
+          default: 100
+          description: "In hundredths: 100 = 1.00 (the default), 150 = 1.50, 2345 = 23.45. From 1 (0.01) to
+            100000 (1000.00)."
+          example: 150
+        unitPrice:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+            - description: Excluding VAT, at least 0.
+        discount:
+          $ref: "#/components/schemas/Discount"
+        vatRate:
+          $ref: "#/components/schemas/VatRate"
+        vat:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+            - description: The line's VAT on its discounted net, within 1p of ours; 0 when exempt or 0%.
+      required:
+        - title
+        - unitPrice
+        - vatRate
+        - vat
+      title: QuoteItemRequest
+    VatRate:
+      type: string
+      title: VatRate
+      enum:
+        - exempt
+        - 0%
+        - 5%
+        - 20%
     NotImplementedProblem:
       type: object
       properties:
@@ -466,54 +1104,28 @@ components:
         - status
         - code
       title: NotImplementedProblem
-    CreatedApplication:
-      allOf:
-        - $ref: "#/components/schemas/Application"
-        - type: object
-          properties:
-            handoffUrl:
-              type: string
-              format: uri
-          required:
-            - handoffUrl
-      title: CreatedApplication
-    CreateApplicationRequest:
+    AmendApplicationRequest:
       type: object
       properties:
-        partnerReference:
-          type: string
-          minLength: 1
-          maxLength: 128
-        customer:
-          $ref: "#/components/schemas/Customer"
-        propertyAddress:
-          $ref: "#/components/schemas/Address"
-        amount:
-          $ref: "#/components/schemas/Amount"
+        quote:
+          $ref: "#/components/schemas/QuoteRequest"
       required:
-        - partnerReference
-        - customer
-        - propertyAddress
-        - amount
-      title: CreateApplicationRequest
-    Address:
+        - quote
+      title: AmendApplicationRequest
+    Handoff:
       type: object
       properties:
-        line1:
+        handoffUrl:
           type: string
-        line2:
-          type:
-            - string
-            - "null"
-        town:
+          format: uri
+          description: "Single use: send the customer here once."
+        expiresAt:
           type: string
-        postcode:
-          type: string
+          format: date-time
       required:
-        - line1
-        - town
-        - postcode
-      title: Address
+        - handoffUrl
+        - expiresAt
+      title: Handoff
     FulfilConflictProblem:
       type: object
       properties:
@@ -566,15 +1178,26 @@ components:
             $ref: "#/components/schemas/Problem"
     Conflict:
       description: email_conflict when the partnerReference belongs to a different customer email;
-        invalid_state when the amount changes and the application is not created, in progress,
-        submitted or approved.
+        invalid_state when the application has ended, or when the quote changes and the application
+        is not created or in progress.
       content:
         application/problem+json:
           schema:
             $ref: "#/components/schemas/Problem"
     Unprocessable:
-      description: product_unavailable or amount_out_of_bounds.
+      description: "The quote is refused: currency_mismatch (not GBP, or not one currency),
+        invalid_line_item (detail names the item and the rule), total_out_of_range (our total
+        including VAT is not above zero, or is over 1000000000, £10,000,000.00), or total_mismatch
+        (expectedTotal differs from ours; totals carries ours). product_unavailable and
+        amount_out_of_bounds are reserved."
       content:
         application/problem+json:
           schema:
-            $ref: "#/components/schemas/Problem"
+            $ref: "#/components/schemas/QuoteProblem"
+    Forbidden:
+      description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+        detail. Nothing was written."
+      content:
+        application/problem+json:
+          schema:
+            $ref: "#/components/schemas/ScopeProblem"
