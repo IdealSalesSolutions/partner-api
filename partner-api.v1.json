@@ -1635,7 +1635,7 @@
         }
       },
       "Unprocessable": {
-        "description": "The quote is refused: currency_mismatch (not GBP, or not one currency), invalid_line_item (detail names the item and the rule), total_out_of_range (our total including VAT is not above zero, or is over 1000000000, £10,000,000.00), or total_mismatch (expectedTotal differs from ours; totals carries ours). product_unavailable and amount_out_of_bounds are reserved.",
+        "description": "The quote is refused: currency_mismatch (not GBP, or not one currency), invalid_line_item (detail names the item and the rule), total_out_of_range (our total including VAT is not above zero, or is over 1000000000, £10,000,000.00), total_mismatch (expectedTotal differs from ours; totals carries ours), product_unavailable (no finance product is offered for a new or changed quote now), or amount_out_of_bounds (the total including VAT is outside every offered product's loan amounts).",
         "content": {
           "application/problem+json": {
             "schema": {
