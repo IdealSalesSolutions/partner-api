@@ -1835,7 +1835,7 @@
       "Status": {
         "type": "string",
         "title": "ApplicationStatus",
-        "description": "referred is reserved: not sent today.",
+        "description": "referred: the lender is looking more closely before it decides; approved, declined or expired follows. A customer who leaves the lender's site before finishing returns the application from submitted, referred or approved to in_progress, to submit again; only the customer, the partner or Ideal cancels it.",
         "enum": [
           "created",
           "in_progress",
