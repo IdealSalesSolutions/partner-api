@@ -7,12 +7,231 @@ info:
     name: Proprietary
     identifier: LicenseRef-Proprietary
 servers:
-  - url: https://api.example.invalid
+  - url: https://api.example.invalid/partner
+    description: A placeholder. Use the base URL you are given, which ends in /partner.
 security:
   - partnerApiKey: []
 tags:
+  - name: getting-started
+    x-displayName: Getting started
+    description: >-
+      1. **Get an API key.** A partner admin creates keys in the partner admin, choosing each key's
+         scopes (`applications:create`, `applications:read`, `applications:amend`) and, optionally,
+         the IP ranges it may be used from. The key is shown once. Send it on every request as
+         `Authorization: Bearer <key>`. The server in this page is a placeholder: use the base URL you
+         are given, which ends in `/partner`. Every path here, such as `/v1/applications`, follows it.
+      2. **Create the application** with `POST /v1/applications`: your `partnerReference`, the
+      customer,
+         the property and the quote. A `201` returns the Application and a `handoffUrl`.
+      3. **Send the customer to `handoffUrl`.** It works once and expires 30 minutes after it is
+      issued.
+         For another, call `issueHandoff` (or repeat the create): each call issues a new one.
+      4. **Receive webhooks.** A partner admin registers an https URL and creates the signing secret
+      in
+         the partner admin. Each status change and each amend is POSTed there, signed: see
+         *Verifying webhook signatures*. Read the full Application with `getApplication` at any time.
+    x-traitTag: true
+  - name: money
+    x-displayName: Money and quantities
+    description: >-
+      All three are whole numbers; nothing in this API is a decimal.
+
+
+      - **Money** is `{ "amount", "currency" }`, `amount` in pence: `2345` = £23.45, from `0` to
+        `1000000000` (£10,000,000.00). `currency` is `GBP`, the only one accepted for now.
+      - **quantity** is in hundredths: **`100` = one item**, `150` = 1.5 (an hour and a half), from
+        `1` to `100000`. Leave it out for one item.
+      - **percentage** (a percentage discount) is in hundredths of a percent: `1000` = 10.00%, from
+        `1` to `10000`.
+
+      How each line is priced, which is how your figures are checked:
+
+
+      1. gross = quantity × unitPrice ÷ 100, rounded half away from zero to a whole penny.
+
+      2. A discount is at most gross. For a percentage discount, its `amount` must be within 1p of
+         gross × percentage ÷ 10000.
+      3. net = gross − the discount's amount.
+
+      4. `vat` must be within 1p of net × the rate for `5%` and `20%`, and exactly `0` for
+         `exempt` and `0%`. A line outside these rules is refused with `422 invalid_line_item`.
+
+      The total including VAT is the sum of every line's net and vat. `expectedTotal` must equal it
+
+      exactly, or the quote is refused with `422 total_mismatch` and `totals` carries ours. That
+      total
+
+      must be above zero (`total_out_of_range`) and inside the loan amounts of a finance product
+      offered
+
+      to you now (`amount_out_of_bounds`).
+
+
+      Worked example (*Package plus add-ons* under createApplication): the package is 100 × 149900 ÷
+      100
+
+      = 149900 gross, less 10% (`1000`) = 14990, so net 134910 and VAT 26982; 1.5 hours (`150`) at
+      6000 is
+
+      9000 net and 1800 VAT; the search fee, quantity left out, is 2500 net and exempt. The total is
+
+      146410 + 28782 = **175192** pence, £1,751.92: the `expectedTotal` sent.
+    x-traitTag: true
+  - name: webhook-signatures
+    x-displayName: Verifying webhook signatures
+    description: |-
+      Each delivery carries `X-Signature: t=<unix seconds>,v1=<hex>`. To verify it:
+
+      1. Take the request body's raw bytes, **before** parsing the JSON (re-serialising changes them).
+      2. Compute HMAC-SHA256, keyed with your webhook secret (the whole string shown, `whsec_`
+         included, as UTF-8), over `t`, a full stop, then the raw body.
+      3. Compare its lowercase hex with each `v1` in constant time. Accept the delivery only if one
+         matches and `t` is within 5 minutes of your clock, either side.
+
+      For 24 hours after you rotate the secret, the header carries two `v1` entries, one per secret.
+
+      **Worked example.** With the example secret `whsec_example_do_not_use` and this raw body:
+
+      ```
+      {"eventId":"0b6f3c1e-7d2a-4f58-9c41-3e8a5d2b7f90","type":"application.status_changed","occurredAt":"2026-10-12T09:41:07.000Z","applicationId":"5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10","partnerReference":"PB-104231","from":"created","to":"in_progress"}
+      ```
+
+      the signed string is `1791798067.` followed by that body, and the header is:
+
+      ```
+      X-Signature: t=1791798067,v1=5cd52388091b18ca49ccffe17dd8d15475426045c29dcf9bd45ea48d1bebef53
+      ```
+
+      so the HMAC's hex is `5cd52388091b18ca49ccffe17dd8d15475426045c29dcf9bd45ea48d1bebef53`.
+
+      **Node:**
+
+      ```js
+      import { createHmac, timingSafeEqual } from "node:crypto";
+
+      // header: X-Signature. rawBody: the request body's bytes, before any JSON parsing (a Buffer).
+      export function verifySignature(header, rawBody, secret, nowSeconds = Math.floor(Date.now() / 1000)) {
+        const parts = header.split(",").map((p) => p.split("="));
+        const t = parts.find(([k]) => k === "t")?.[1];
+        if (!t || !/^\d+$/.test(t) || Math.abs(nowSeconds - Number(t)) > 300) return false;
+        const expected = createHmac("sha256", Buffer.from(secret, "utf8"))
+          .update(Buffer.concat([Buffer.from(`${t}.`, "utf8"), rawBody]))
+          .digest();
+        return parts
+          .filter(([k, v]) => k === "v1" && /^[0-9a-f]{64}$/.test(v ?? ""))
+          .some(([, v]) => timingSafeEqual(Buffer.from(v, "hex"), expected));
+      }
+      ```
+
+      Answer `2XX` within 10 seconds. Every retry and replay of an event has the
+      same `eventId`: use it to ignore a delivery you have already handled.
+    x-traitTag: true
+  - name: idempotency
+    x-displayName: Idempotency and retries
+    description: >-
+      **createApplication is idempotent on `partnerReference`.** If a create times out, send the
+      same
+
+      request again. For a `partnerReference` you have already used:
+
+
+      - with the same customer email, it answers `200` with the Application and a fresh
+      `handoffUrl`,
+        creating nothing. A changed title, name, mobile or property updates what we hold.
+      - with a different customer email, it is refused with `409 email_conflict`.
+
+      - with a changed quote, it is an amend: the key needs `applications:amend` as well (otherwise
+        `403 insufficient_scope`, nothing changed), and the application must be created or in progress
+        (otherwise `409 invalid_state`).
+      - once the application has ended (declined, withdrawn, cancelled, expired or paid out), it is
+        refused with `409 invalid_state`.
+
+      **amendApplication replaces the whole quote.** It answers `201` while the application is
+      created
+
+      or in progress. From submitted or approved an amend will move the application back to in
+      progress;
+
+      that is not yet available and answers `501`. From any other status it is refused with
+
+      `409 invalid_state`.
+
+
+      **fulfilApplication** takes an `Idempotency-Key`; its rules are on the operation. It answers
+
+      `501` until it is available.
+
+
+      **Webhooks** are retried with growing gaps for 24 hours, then marked failed. Read the
+      application
+
+      with `getApplication` to catch up; Ideal can replay any event.
+    x-traitTag: true
+  - name: errors
+    x-displayName: Errors
+    description: >-
+      Every error is `application/problem+json`:
+
+
+      ```json
+
+      { "type": "about:blank", "title": "Conflict", "status": 409, "code": "email_conflict",
+        "detail": "This partnerReference belongs to a different customer." }
+      ```
+
+
+      Branch on `status` and `code`. `title` and `detail` are written for people and may change;
+
+      `detail` is sometimes absent.
+
+
+      | Status | code | When |
+
+      |---|---|---|
+
+      | 400 | `bad_request` | The request does not match the contract. `detail` usually lists each
+      problem in the first part of the request that fails (query, path, headers, then body) as
+      `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param`
+      or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse
+      after those checks, get a sentence instead. |
+
+      | 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP
+      ranges. |
+
+      | 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs
+      (`detail` names it), or a create replay changes the quote and the key lacks
+      `applications:amend`. Nothing was written. |
+
+      | 404 | `not_found` | No application of yours has that id or `partnerReference`. |
+
+      | 409 | `email_conflict`, `invalid_state`, `idempotency_key_conflict` | See *Idempotency and
+      retries* and each operation. |
+
+      | 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`,
+      `product_unavailable`, `amount_out_of_bounds` | The quote is refused: see *Money and
+      quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. |
+
+      | 501 | `not_implemented` | The operation is not yet available. |
+
+
+      Each operation lists its own responses, with an example of each.
+    x-traitTag: true
   - name: applications
     description: Applications.
+  - name: webhooks
+    description: What Ideal sends to your webhook URL.
+x-tagGroups:
+  - name: Guides
+    tags:
+      - getting-started
+      - money
+      - webhook-signatures
+      - idempotency
+      - errors
+  - name: API
+    tags:
+      - applications
+      - webhooks
 paths:
   /v1/applications:
     post:
@@ -23,67 +242,286 @@ paths:
       tags:
         - applications
       summary: Create an Application, idempotent on partnerReference.
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: >-
+            curl -X POST 'https://api.example.invalid/partner/v1/applications' \
+              -H "Authorization: Bearer $PARTNER_API_KEY" \
+              -H 'Content-Type: application/json' \
+              --data '{
+              "partnerReference": "PB-104231",
+              "customer": {
+                "title": "ms",
+                "firstName": "Jane",
+                "lastName": "Seller",
+                "email": "jane.seller@example.com",
+                "mobile": "+447700900123"
+              },
+              "property": {
+                "flat": "Flat 2",
+                "buildingName": "Mill House",
+                "buildingNumber": "22",
+                "line1": "Mill Lane",
+                "town": "York",
+                "postcode": "YO1 7HH",
+                "country": "GB"
+              },
+              "quote": {
+                "items": [
+                  {
+                    "title": "Standard listing",
+                    "description": "Includes:\n- Listing on the major property portals\n- For-sale board",
+                    "quantity": 100,
+                    "unitPrice": {
+                      "amount": 99900,
+                      "currency": "GBP"
+                    },
+                    "vatRate": "20%",
+                    "vat": {
+                      "amount": 19980,
+                      "currency": "GBP"
+                    }
+                  }
+                ],
+                "expectedTotal": {
+                  "amount": 119880,
+                  "currency": "GBP"
+                }
+              }
+            }'
+        - lang: JavaScript
+          label: Node (fetch)
+          source: >-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                "partnerReference": "PB-104231",
+                "customer": {
+                  "title": "ms",
+                  "firstName": "Jane",
+                  "lastName": "Seller",
+                  "email": "jane.seller@example.com",
+                  "mobile": "+447700900123"
+                },
+                "property": {
+                  "flat": "Flat 2",
+                  "buildingName": "Mill House",
+                  "buildingNumber": "22",
+                  "line1": "Mill Lane",
+                  "town": "York",
+                  "postcode": "YO1 7HH",
+                  "country": "GB"
+                },
+                "quote": {
+                  "items": [
+                    {
+                      "title": "Standard listing",
+                      "description": "Includes:\n- Listing on the major property portals\n- For-sale board",
+                      "quantity": 100,
+                      "unitPrice": {
+                        "amount": 99900,
+                        "currency": "GBP"
+                      },
+                      "vatRate": "20%",
+                      "vat": {
+                        "amount": 19980,
+                        "currency": "GBP"
+                      }
+                    }
+                  ],
+                  "expectedTotal": {
+                    "amount": 119880,
+                    "currency": "GBP"
+                  }
+                }
+              }),
+            });
+
+            const answer = await res.json(); // application/json, or application/problem+json on an
+            error
       requestBody:
         required: true
         content:
           application/json:
-            example:
-              partnerReference: PB-104233
-              customer:
-                title: ms
-                firstName: Jane
-                lastName: Seller
-                email: jane.seller@example.com
-                mobile: "+447700900123"
-              property:
-                flat: Flat 2
-                buildingName: Mill House
-                buildingNumber: "22"
-                line1: Mill Lane
-                town: York
-                postcode: YO1 7HH
-                country: GB
-              quote:
-                items:
-                  - title: Listing fee
-                    description: |-
-                      Includes:
-                      - Online listing
-                      - For-sale board
-                    quantity: 100
-                    unitPrice:
-                      amount: 99900
+            examples:
+              oneListingFee:
+                summary: One listing fee
+                value:
+                  partnerReference: PB-104231
+                  customer:
+                    title: ms
+                    firstName: Jane
+                    lastName: Seller
+                    email: jane.seller@example.com
+                    mobile: "+447700900123"
+                  property:
+                    flat: Flat 2
+                    buildingName: Mill House
+                    buildingNumber: "22"
+                    line1: Mill Lane
+                    town: York
+                    postcode: YO1 7HH
+                    country: GB
+                  quote:
+                    items:
+                      - title: Standard listing
+                        description: |-
+                          Includes:
+                          - Listing on the major property portals
+                          - For-sale board
+                        quantity: 100
+                        unitPrice:
+                          amount: 99900
+                          currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 19980
+                          currency: GBP
+                    expectedTotal:
+                      amount: 119880
                       currency: GBP
-                    discount:
-                      type: percentage
-                      percentage: 1000
-                      amount:
-                        amount: 9990
-                        currency: GBP
-                    vatRate: 20%
-                    vat:
-                      amount: 17982
+              packageWithAddOns:
+                summary: Package plus add-ons with a percentage discount
+                value:
+                  partnerReference: PB-104232
+                  customer:
+                    title: ms
+                    firstName: Jane
+                    lastName: Seller
+                    email: jane.seller@example.com
+                    mobile: "+447700900123"
+                  property:
+                    flat: Flat 2
+                    buildingName: Mill House
+                    buildingNumber: "22"
+                    line1: Mill Lane
+                    town: York
+                    postcode: YO1 7HH
+                    country: GB
+                  quote:
+                    items:
+                      - title: Premium package
+                        description: |-
+                          Includes:
+                          - Professional photography
+                          - Floorplan
+                          - Hosted viewings
+                        quantity: 100
+                        unitPrice:
+                          amount: 149900
+                          currency: GBP
+                        discount:
+                          type: percentage
+                          percentage: 1000
+                          amount:
+                            amount: 14990
+                            currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 26982
+                          currency: GBP
+                      - title: Accompanied viewings (hours)
+                        quantity: 150
+                        unitPrice:
+                          amount: 6000
+                          currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 1800
+                          currency: GBP
+                      - title: Property search fee
+                        unitPrice:
+                          amount: 2500
+                          currency: GBP
+                        vatRate: exempt
+                        vat:
+                          amount: 0
+                          currency: GBP
+                    expectedTotal:
+                      amount: 175192
                       currency: GBP
-                  - title: Photography (hours)
-                    quantity: 150
-                    unitPrice:
-                      amount: 6000
+              amountDiscount:
+                summary: Amount discount
+                value:
+                  partnerReference: PB-104233
+                  customer:
+                    title: ms
+                    firstName: Jane
+                    lastName: Seller
+                    email: jane.seller@example.com
+                    mobile: "+447700900123"
+                  property:
+                    flat: Flat 2
+                    buildingName: Mill House
+                    buildingNumber: "22"
+                    line1: Mill Lane
+                    town: York
+                    postcode: YO1 7HH
+                    country: GB
+                  quote:
+                    items:
+                      - title: Standard listing
+                        description: |-
+                          Includes:
+                          - Listing on the major property portals
+                          - For-sale board
+                        quantity: 100
+                        unitPrice:
+                          amount: 99900
+                          currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 17980
+                          currency: GBP
+                        discount:
+                          type: amount
+                          amount:
+                            amount: 10000
+                            currency: GBP
+                    expectedTotal:
+                      amount: 107880
                       currency: GBP
-                    vatRate: 20%
-                    vat:
-                      amount: 1800
+              replay:
+                summary: Replay with the same reference
+                value:
+                  partnerReference: PB-104231
+                  customer:
+                    title: ms
+                    firstName: Jane
+                    lastName: Seller
+                    email: jane.seller@example.com
+                    mobile: "+447700900123"
+                  property:
+                    flat: Flat 2
+                    buildingName: Mill House
+                    buildingNumber: "22"
+                    line1: Mill Lane
+                    town: York
+                    postcode: YO1 7HH
+                    country: GB
+                  quote:
+                    items:
+                      - title: Standard listing
+                        description: |-
+                          Includes:
+                          - Listing on the major property portals
+                          - For-sale board
+                        quantity: 100
+                        unitPrice:
+                          amount: 99900
+                          currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 19980
+                          currency: GBP
+                    expectedTotal:
+                      amount: 119880
                       currency: GBP
-                  - title: Search fee
-                    unitPrice:
-                      amount: 2500
-                      currency: GBP
-                    vatRate: exempt
-                    vat:
-                      amount: 0
-                      currency: GBP
-                expectedTotal:
-                  amount: 121192
-                  currency: GBP
             schema:
               $ref: "#/components/schemas/CreateApplicationRequest"
       responses:
@@ -97,112 +535,341 @@ paths:
             invalid_state and no handoffUrl is issued."
           content:
             application/json:
+              examples:
+                replay:
+                  summary: Replay with the same reference
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104231
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount: null
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 19980
+                            currency: GBP
+                          net:
+                            amount: 99900
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 99900
+                          currency: GBP
+                        amountVat:
+                          amount: 19980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 119880
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
+                    handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR
               schema:
                 $ref: "#/components/schemas/CreatedApplication"
         "201":
           description: Created.
           content:
             application/json:
-              example:
-                id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
-                partnerReference: PB-104233
-                status: created
-                customer:
-                  title: ms
-                  firstName: Jane
-                  lastName: Seller
-                  email: jane.seller@example.com
-                  mobile: "+447700900123"
-                property:
-                  flat: Flat 2
-                  buildingName: Mill House
-                  buildingNumber: "22"
-                  line1: Mill Lane
-                  town: York
-                  postcode: YO1 7HH
-                  country: GB
-                  line2: null
-                  line3: null
-                  county: null
-                  uprn: null
-                quote:
-                  items:
-                    - title: Listing fee
-                      description: |-
-                        Includes:
-                        - Online listing
-                        - For-sale board
-                      quantity: 100
-                      unitPrice:
-                        amount: 99900
-                        currency: GBP
-                      discount:
-                        type: percentage
-                        percentage: 1000
-                        amount:
-                          amount: 9990
+              examples:
+                oneListingFee:
+                  summary: One listing fee
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104231
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount: null
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 19980
+                            currency: GBP
+                          net:
+                            amount: 99900
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 99900
                           currency: GBP
-                      vatRate: 20%
-                      vat:
-                        amount: 17982
-                        currency: GBP
-                      net:
-                        amount: 89910
-                        currency: GBP
-                    - title: Photography (hours)
-                      quantity: 150
-                      unitPrice:
-                        amount: 6000
-                        currency: GBP
-                      vatRate: 20%
-                      vat:
-                        amount: 1800
-                        currency: GBP
-                      description: null
-                      discount: null
-                      net:
-                        amount: 9000
-                        currency: GBP
-                    - title: Search fee
-                      unitPrice:
-                        amount: 2500
-                        currency: GBP
-                      vatRate: exempt
-                      vat:
-                        amount: 0
-                        currency: GBP
-                      description: null
-                      quantity: 100
-                      discount: null
-                      net:
-                        amount: 2500
-                        currency: GBP
-                  total:
-                    amountVatExclusive:
-                      amount: 101410
-                      currency: GBP
-                    amountVat:
-                      amount: 19782
-                      currency: GBP
-                    amountVatInclusive:
-                      amount: 121192
-                      currency: GBP
-                  createdAt: 2026-10-12T09:30:00.000Z
-                timestamps:
-                  createdAt: 2026-10-12T09:30:00.000Z
-                  updatedAt: 2026-10-12T09:30:00.000Z
-                  statusChangedAt: 2026-10-12T09:30:00.000Z
-                  fulfilledAt: null
-                  paidOutAt: null
-                handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1J
+                        amountVat:
+                          amount: 19980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 119880
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
+                    handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR
+                packageWithAddOns:
+                  summary: Package plus add-ons with a percentage discount
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104232
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Professional photography
+                            - Floorplan
+                            - Hosted viewings
+                          quantity: 100
+                          discount:
+                            type: percentage
+                            percentage: 1000
+                            amount:
+                              amount: 14990
+                              currency: GBP
+                          title: Premium package
+                          unitPrice:
+                            amount: 149900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 26982
+                            currency: GBP
+                          net:
+                            amount: 134910
+                            currency: GBP
+                        - description: null
+                          quantity: 150
+                          discount: null
+                          title: Accompanied viewings (hours)
+                          unitPrice:
+                            amount: 6000
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 1800
+                            currency: GBP
+                          net:
+                            amount: 9000
+                            currency: GBP
+                        - description: null
+                          quantity: 100
+                          discount: null
+                          title: Property search fee
+                          unitPrice:
+                            amount: 2500
+                            currency: GBP
+                          vatRate: exempt
+                          vat:
+                            amount: 0
+                            currency: GBP
+                          net:
+                            amount: 2500
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 146410
+                          currency: GBP
+                        amountVat:
+                          amount: 28782
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 175192
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
+                    handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR
+                amountDiscount:
+                  summary: Amount discount
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104233
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount:
+                            type: amount
+                            amount:
+                              amount: 10000
+                              currency: GBP
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 17980
+                            currency: GBP
+                          net:
+                            amount: 89900
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 89900
+                          currency: GBP
+                        amountVat:
+                          amount: 17980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 107880
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
+                    handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR
               schema:
                 $ref: "#/components/schemas/CreatedApplication"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                fieldErrors:
+                  summary: Validation with field errors
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: 'json.customer.email: Invalid email address; json.quote.items.0.vatRate: Invalid option:
+                      expected one of "exempt"|"0%"|"5%"|"20%"'
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:create
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: createApplication needs a key with applications:create.
+                insufficientScope:
+                  summary: A changed quote with a create-only key
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: A changed quote needs a key with applications:amend. Nothing was changed; the same quote, or
+                      no change, needs applications:create alone.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
         "409":
           $ref: "#/components/responses/Conflict"
         "422":
@@ -215,6 +882,27 @@ paths:
       summary: Find an Application by the partner reference.
       tags:
         - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: >-
+            curl -X GET
+            'https://api.example.invalid/partner/v1/applications?partnerReference=PB-104231' \
+              -H "Authorization: Bearer $PARTNER_API_KEY"
+        - lang: JavaScript
+          label: Node (fetch)
+          source: >-
+            const res = await
+            fetch("https://api.example.invalid/partner/v1/applications?partnerReference=PB-104231",
+            {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+              },
+            });
+
+            const answer = await res.json(); // application/json, or application/problem+json on an
+            error
       parameters:
         - schema:
             type: string
@@ -228,12 +916,102 @@ paths:
           description: The Application with this partnerReference.
           content:
             application/json:
+              examples:
+                oneListingFee:
+                  summary: One listing fee
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104231
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount: null
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 19980
+                            currency: GBP
+                          net:
+                            amount: 99900
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 99900
+                          currency: GBP
+                        amountVat:
+                          amount: 19980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 119880
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
               schema:
                 $ref: "#/components/schemas/Application"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                noReference:
+                  summary: No partnerReference
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "query.partnerReference: Invalid input: expected string, received undefined"
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:read
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: findApplicationByPartnerReference needs a key with applications:read.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/applications/{applicationId}:
@@ -245,6 +1023,22 @@ paths:
       summary: Get an Application.
       tags:
         - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: |-
+            curl -X GET 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10' \
+              -H "Authorization: Bearer $PARTNER_API_KEY"
+        - lang: JavaScript
+          label: Node (fetch)
+          source: |-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10", {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+              },
+            });
+            const answer = await res.json(); // application/json, or application/problem+json on an error
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
       responses:
@@ -252,12 +1046,102 @@ paths:
           description: The Application.
           content:
             application/json:
+              examples:
+                oneListingFee:
+                  summary: One listing fee
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104231
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount: null
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 19980
+                            currency: GBP
+                          net:
+                            amount: 99900
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 99900
+                          currency: GBP
+                        amountVat:
+                          amount: 19980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 119880
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
               schema:
                 $ref: "#/components/schemas/Application"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                badId:
+                  summary: An application id that is not a UUID
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "param.applicationId: Invalid UUID"
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:read
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: getApplication needs a key with applications:read.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
   /v1/applications/{applicationId}/amendments:
@@ -274,12 +1158,135 @@ paths:
         refused."
       tags:
         - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: |-
+            curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/amendments' \
+              -H "Authorization: Bearer $PARTNER_API_KEY" \
+              -H 'Content-Type: application/json' \
+              --data '{
+              "quote": {
+                "items": [
+                  {
+                    "title": "Standard listing",
+                    "description": "Includes:\n- Listing on the major property portals\n- For-sale board",
+                    "quantity": 100,
+                    "unitPrice": {
+                      "amount": 99900,
+                      "currency": "GBP"
+                    },
+                    "vatRate": "20%",
+                    "vat": {
+                      "amount": 19980,
+                      "currency": "GBP"
+                    }
+                  },
+                  {
+                    "title": "Professional photography",
+                    "quantity": 100,
+                    "unitPrice": {
+                      "amount": 15000,
+                      "currency": "GBP"
+                    },
+                    "vatRate": "20%",
+                    "vat": {
+                      "amount": 3000,
+                      "currency": "GBP"
+                    }
+                  }
+                ],
+                "expectedTotal": {
+                  "amount": 137880,
+                  "currency": "GBP"
+                }
+              }
+            }'
+        - lang: JavaScript
+          label: Node (fetch)
+          source: |-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/amendments", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                "quote": {
+                  "items": [
+                    {
+                      "title": "Standard listing",
+                      "description": "Includes:\n- Listing on the major property portals\n- For-sale board",
+                      "quantity": 100,
+                      "unitPrice": {
+                        "amount": 99900,
+                        "currency": "GBP"
+                      },
+                      "vatRate": "20%",
+                      "vat": {
+                        "amount": 19980,
+                        "currency": "GBP"
+                      }
+                    },
+                    {
+                      "title": "Professional photography",
+                      "quantity": 100,
+                      "unitPrice": {
+                        "amount": 15000,
+                        "currency": "GBP"
+                      },
+                      "vatRate": "20%",
+                      "vat": {
+                        "amount": 3000,
+                        "currency": "GBP"
+                      }
+                    }
+                  ],
+                  "expectedTotal": {
+                    "amount": 137880,
+                    "currency": "GBP"
+                  }
+                }
+              }),
+            });
+            const answer = await res.json(); // application/json, or application/problem+json on an error
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
       requestBody:
         required: true
         content:
           application/json:
+            examples:
+              replaceQuote:
+                summary: Replace the quote
+                value:
+                  quote:
+                    items:
+                      - title: Standard listing
+                        description: |-
+                          Includes:
+                          - Listing on the major property portals
+                          - For-sale board
+                        quantity: 100
+                        unitPrice:
+                          amount: 99900
+                          currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 19980
+                          currency: GBP
+                      - title: Professional photography
+                        quantity: 100
+                        unitPrice:
+                          amount: 15000
+                          currency: GBP
+                        vatRate: 20%
+                        vat:
+                          amount: 3000
+                          currency: GBP
+                    expectedTotal:
+                      amount: 137880
+                      currency: GBP
             schema:
               $ref: "#/components/schemas/AmendApplicationRequest"
       responses:
@@ -287,20 +1294,139 @@ paths:
           description: The Quote was replaced.
           content:
             application/json:
+              examples:
+                replaceQuote:
+                  summary: Replace the quote
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PB-104231
+                    status: created
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount: null
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 19980
+                            currency: GBP
+                          net:
+                            amount: 99900
+                            currency: GBP
+                        - description: null
+                          quantity: 100
+                          discount: null
+                          title: Professional photography
+                          unitPrice:
+                            amount: 15000
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 3000
+                            currency: GBP
+                          net:
+                            amount: 15000
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 114900
+                          currency: GBP
+                        amountVat:
+                          amount: 22980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 137880
+                          currency: GBP
+                      createdAt: 2026-10-12T10:02:44.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T10:02:44.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
               schema:
                 $ref: "#/components/schemas/Application"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                noItems:
+                  summary: A quote with no items
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "json.quote.items: Too small: expected array to have >=1 items"
+                badId:
+                  summary: An application id that is not a UUID
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "param.applicationId: Invalid UUID"
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:amend
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: amendApplication needs a key with applications:amend.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           description: invalid_state when the application is not created, in progress, submitted or approved.
           content:
             application/problem+json:
+              examples:
+                ended:
+                  summary: The application has ended
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: invalid_state
+                    detail: The quote can only change before the agreement is signed.
               schema:
                 $ref: "#/components/schemas/Problem"
         "422":
@@ -309,6 +1435,14 @@ paths:
           description: Not yet available.
           content:
             application/problem+json:
+              examples:
+                notImplemented:
+                  summary: Not yet available
+                  value:
+                    type: about:blank
+                    title: amendApplication is not implemented
+                    status: 501
+                    code: not_implemented
               schema:
                 $ref: "#/components/schemas/NotImplementedProblem"
   /v1/applications/{applicationId}/handoff:
@@ -323,6 +1457,22 @@ paths:
         paid out."
       tags:
         - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: |-
+            curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/handoff' \
+              -H "Authorization: Bearer $PARTNER_API_KEY"
+        - lang: JavaScript
+          label: Node (fetch)
+          source: |-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/handoff", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+              },
+            });
+            const answer = await res.json(); // application/json, or application/problem+json on an error
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
       responses:
@@ -330,20 +1480,62 @@ paths:
           description: A handoff URL was issued.
           content:
             application/json:
+              examples:
+                issued:
+                  summary: A new handoff URL
+                  value:
+                    handoffUrl: https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR
+                    expiresAt: 2026-10-12T10:00:00.000Z
               schema:
                 $ref: "#/components/schemas/Handoff"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                badId:
+                  summary: An application id that is not a UUID
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "param.applicationId: Invalid UUID"
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
         "403":
-          $ref: "#/components/responses/Forbidden"
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:create
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: issueHandoff needs a key with applications:create.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
           description: invalid_state when the application has ended.
           content:
             application/problem+json:
+              examples:
+                ended:
+                  summary: The application has ended
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: invalid_state
+                    detail: The application has ended.
               schema:
                 $ref: "#/components/schemas/Problem"
   /v1/applications/{applicationId}/fulfil:
@@ -365,6 +1557,24 @@ paths:
         state and starts nothing new. Not yet available: this operation currently answers 501."
       tags:
         - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: |-
+            curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/fulfil' \
+              -H "Authorization: Bearer $PARTNER_API_KEY" \
+              -H 'Idempotency-Key: PB-104231-fulfil-1'
+        - lang: JavaScript
+          label: Node (fetch)
+          source: |-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/fulfil", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+                "Idempotency-Key": "PB-104231-fulfil-1",
+              },
+            });
+            const answer = await res.json(); // application/json, or application/problem+json on an error
       parameters:
         - $ref: "#/components/parameters/ApplicationId"
         - schema:
@@ -397,9 +1607,46 @@ paths:
               schema:
                 $ref: "#/components/schemas/Application"
         "400":
-          $ref: "#/components/responses/BadRequest"
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                noIdempotencyKey:
+                  summary: No Idempotency-Key
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "header.Idempotency-Key: Invalid input: expected string, received undefined"
+                badId:
+                  summary: An application id that is not a UUID
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "param.applicationId: Invalid UUID"
+              schema:
+                $ref: "#/components/schemas/Problem"
         "401":
           $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:amend
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: fulfilApplication needs a key with applications:amend.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
         "409":
@@ -415,6 +1662,14 @@ paths:
           description: Not yet available.
           content:
             application/problem+json:
+              examples:
+                notImplemented:
+                  summary: Not yet available
+                  value:
+                    type: about:blank
+                    title: fulfilApplication is not implemented
+                    status: 501
+                    code: not_implemented
               schema:
                 $ref: "#/components/schemas/NotImplementedProblem"
 webhooks:
@@ -438,21 +1693,62 @@ webhooks:
         one before it has been delivered or has failed; events for different applications arrive
         independently. Every retry and replay carries the same eventId."
       security: []
+      tags:
+        - webhooks
       parameters:
         - schema:
             type: string
             description: t=<unix seconds>,v1=<HMAC-SHA256 of "<t>.<raw body>" keyed with your webhook secret,
-              lowercase hex>, with a second v1 for 24 hours after a rotation.
-            example: t=1760261400,v1=5d41402abc4b2a76b9719d911017c592ae2f1f6a0c3e0c9b0e3c1f1e2d3c4b5a
+              lowercase hex>, with a second v1 for 24 hours after a rotation. The examples are
+              signed with the example secret whsec_example_do_not_use over each example body's
+              compact JSON.
           required: true
           description: t=<unix seconds>,v1=<HMAC-SHA256 of "<t>.<raw body>" keyed with your webhook secret,
-            lowercase hex>, with a second v1 for 24 hours after a rotation.
+            lowercase hex>, with a second v1 for 24 hours after a rotation. The examples are signed
+            with the example secret whsec_example_do_not_use over each example body's compact JSON.
+          examples:
+            statusChanged:
+              summary: application.status_changed
+              value: t=1791798067,v1=5cd52388091b18ca49ccffe17dd8d15475426045c29dcf9bd45ea48d1bebef53
+            amended:
+              summary: application.amended
+              value: t=1791799364,v1=33281152afbfde5625cdc9ef277c0f1090d479b0888569892d6b483c8d950e60
           name: X-Signature
           in: header
       requestBody:
         required: true
         content:
           application/json:
+            examples:
+              statusChanged:
+                summary: application.status_changed
+                value:
+                  eventId: 0b6f3c1e-7d2a-4f58-9c41-3e8a5d2b7f90
+                  type: application.status_changed
+                  occurredAt: 2026-10-12T09:41:07.000Z
+                  applicationId: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                  partnerReference: PB-104231
+                  from: created
+                  to: in_progress
+              amended:
+                summary: application.amended
+                value:
+                  eventId: 8e2d4a6b-1c3f-4e7a-b5d9-0f2c6a8e4b13
+                  type: application.amended
+                  occurredAt: 2026-10-12T10:02:44.000Z
+                  applicationId: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                  partnerReference: PB-104231
+                  quote:
+                    total:
+                      amountVatExclusive:
+                        amount: 114900
+                        currency: GBP
+                      amountVat:
+                        amount: 22980
+                        currency: GBP
+                      amountVatInclusive:
+                        amount: 137880
+                        currency: GBP
             schema:
               $ref: "#/components/schemas/WebhookEvent"
       responses:
@@ -755,9 +2051,9 @@ components:
             - "null"
         quantity:
           type: integer
-          description: "In hundredths: 100 = 1.00 (the default), 150 = 1.50, 2345 = 23.45. From 1 (0.01) to
-            100000 (1000.00)."
-          example: 150
+          description: "100 = one item. In hundredths: 100 = 1.00 (the default), 150 = 1.50, 2345 = 23.45.
+            From 1 (0.01) to 100000 (1000.00)."
+          example: 100
         unitPrice:
           $ref: "#/components/schemas/Money"
         discount:
@@ -1062,9 +2358,9 @@ components:
           minimum: 1
           maximum: 100000
           default: 100
-          description: "In hundredths: 100 = 1.00 (the default), 150 = 1.50, 2345 = 23.45. From 1 (0.01) to
-            100000 (1000.00)."
-          example: 150
+          description: "100 = one item. In hundredths: 100 = 1.00 (the default), 150 = 1.50, 2345 = 23.45.
+            From 1 (0.01) to 100000 (1000.00)."
+          example: 100
         unitPrice:
           allOf:
             - $ref: "#/components/schemas/Money"
@@ -1165,22 +2461,32 @@ components:
       name: applicationId
       in: path
   responses:
-    BadRequest:
-      description: The request does not match the contract.
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/Problem"
     Unauthorized:
       description: Missing or invalid partner API key.
       content:
         application/problem+json:
+          examples:
+            unauthorized:
+              summary: Missing, wrong or revoked key, or one used from outside its IP ranges
+              value:
+                type: about:blank
+                title: Unauthorized
+                status: 401
+                code: unauthorized
           schema:
             $ref: "#/components/schemas/Problem"
     NotFound:
       description: Not found.
       content:
         application/problem+json:
+          examples:
+            notFound:
+              summary: No application of yours with this id or reference
+              value:
+                type: about:blank
+                title: Not Found
+                status: 404
+                code: not_found
           schema:
             $ref: "#/components/schemas/Problem"
     Conflict:
@@ -1189,6 +2495,31 @@ components:
         is not created or in progress.
       content:
         application/problem+json:
+          examples:
+            emailConflict:
+              summary: The partnerReference belongs to another customer
+              value:
+                type: about:blank
+                title: Conflict
+                status: 409
+                code: email_conflict
+                detail: This partnerReference belongs to a different customer.
+            ended:
+              summary: The application has ended
+              value:
+                type: about:blank
+                title: Conflict
+                status: 409
+                code: invalid_state
+                detail: The application has ended.
+            quoteLocked:
+              summary: A changed quote once the application is submitted
+              value:
+                type: about:blank
+                title: Conflict
+                status: 409
+                code: invalid_state
+                detail: The quote can only change while the application is created or in progress.
           schema:
             $ref: "#/components/schemas/Problem"
     Unprocessable:
@@ -1200,12 +2531,65 @@ components:
         including VAT is outside every offered product's loan amounts)."
       content:
         application/problem+json:
+          examples:
+            totalMismatch:
+              summary: "total_mismatch: expectedTotal is not our total"
+              value:
+                type: about:blank
+                title: The quote is refused
+                status: 422
+                code: total_mismatch
+                detail: expectedTotal differs from our total including VAT; totals has ours.
+                totals:
+                  amountVatExclusive:
+                    amount: 99900
+                    currency: GBP
+                  amountVat:
+                    amount: 19980
+                    currency: GBP
+                  amountVatInclusive:
+                    amount: 119880
+                    currency: GBP
+            invalidLineItem:
+              summary: "invalid_line_item: VAT not within 1p of the rate"
+              value:
+                type: about:blank
+                title: The quote is refused
+                status: 422
+                code: invalid_line_item
+                detail: "quote.items[0]: vat must be within 1p of the rate on the discounted net, and 0 when exempt
+                  or 0%"
+            currencyMismatch:
+              summary: "currency_mismatch: not GBP"
+              value:
+                type: about:blank
+                title: The quote is refused
+                status: 422
+                code: currency_mismatch
+                detail: Every amount must be in GBP.
+            totalOutOfRange:
+              summary: "total_out_of_range: nothing to finance"
+              value:
+                type: about:blank
+                title: The quote is refused
+                status: 422
+                code: total_out_of_range
+                detail: The total including VAT must be above zero and at most 1000000000 (£10,000,000.00).
+            amountOutOfBounds:
+              summary: "amount_out_of_bounds: outside every product's loan amounts"
+              value:
+                type: about:blank
+                title: The quote is refused
+                status: 422
+                code: amount_out_of_bounds
+                detail: The total including VAT is outside the amounts the available finance products cover.
+            productUnavailable:
+              summary: "product_unavailable: no finance product offered now"
+              value:
+                type: about:blank
+                title: The quote is refused
+                status: 422
+                code: product_unavailable
+                detail: No finance product is available for this quote at the moment.
           schema:
             $ref: "#/components/schemas/QuoteProblem"
-    Forbidden:
-      description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
-        detail. Nothing was written."
-      content:
-        application/problem+json:
-          schema:
-            $ref: "#/components/schemas/ScopeProblem"
