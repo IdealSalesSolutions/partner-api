@@ -422,24 +422,31 @@ webhooks:
     post:
       operationId: applicationEventWebhook
       summary: Sent to the partner's webhook URL. HMAC-signed.
-      description: "Ideal POSTs each event to the webhook URL your partner_admin registers in the partner
-        admin. Each delivery is signed: X-Signature is `t=<unix seconds>,v1=<hex>`, where v1 is
-        HMAC-SHA256 keyed with your webhook secret over the string `<t>.<raw body>`, in lowercase
-        hex. To verify: take the raw request bytes before parsing, compute the HMAC over t, a full
-        stop and those bytes, compare it with v1 in constant time, and reject the delivery if they
-        differ or if t is more than 5 minutes old. The webhook secret is your partner's own, shown
-        once to a partner_admin in the partner admin, and can be rotated there. A delivery is
-        retried with backoff until you answer 2XX, and every retry carries the same eventId."
+      description: "Ideal POSTs each event to the https webhook URL your partner_admin registers in the
+        partner admin. Each delivery is signed: X-Signature is `t=<unix seconds>,v1=<hex>`, where v1
+        is HMAC-SHA256 keyed with your webhook secret (the whole string shown, whsec_ included, as
+        UTF-8 bytes) over the string `<t>.<raw body>`, in lowercase hex. To verify: take the raw
+        request bytes before parsing, compute the HMAC over t, a full stop and those bytes, compare
+        it with each v1 in constant time, and accept the delivery only if one matches and t is at
+        most 5 minutes old. The webhook secret is your partner's own, shown once to a partner_admin
+        in the partner admin, and can be rotated there. For 24 hours after a rotation the header
+        carries two v1 entries, one per secret, so you can switch secrets without missing a
+        delivery. A delivery that does not answer 2XX within 10 seconds is retried with growing gaps
+        for 24 hours, then marked failed and Ideal's operations team is alerted; read the
+        application with getApplication to catch up, and Ideal can replay any event. Redirects are
+        not followed. Events for one application arrive in the order they happened, each after the
+        one before it has been delivered or has failed; events for different applications arrive
+        independently. Every retry and replay carries the same eventId."
       security: []
       parameters:
         - schema:
             type: string
             description: t=<unix seconds>,v1=<HMAC-SHA256 of "<t>.<raw body>" keyed with your webhook secret,
-              lowercase hex>.
+              lowercase hex>, with a second v1 for 24 hours after a rotation.
             example: t=1760261400,v1=5d41402abc4b2a76b9719d911017c592ae2f1f6a0c3e0c9b0e3c1f1e2d3c4b5a
           required: true
           description: t=<unix seconds>,v1=<HMAC-SHA256 of "<t>.<raw body>" keyed with your webhook secret,
-            lowercase hex>.
+            lowercase hex>, with a second v1 for 24 hours after a rotation.
           name: X-Signature
           in: header
       requestBody:
