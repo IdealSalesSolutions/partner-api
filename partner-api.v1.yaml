@@ -215,6 +215,14 @@ tags:
 
 
       Each operation lists its own responses, with an example of each.
+
+
+      Every response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us
+      about
+
+      a request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is
+
+      replaced with one of ours.
     x-traitTag: true
   - name: applications
     description: Applications.
