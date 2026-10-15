@@ -211,10 +211,26 @@ tags:
       `product_unavailable`, `amount_out_of_bounds` | The quote is refused: see *Money and
       quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. |
 
+      | 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |
+
       | 501 | `not_implemented` | The operation is not yet available. |
 
 
       Each operation lists its own responses, with an example of each.
+
+
+      **Rate limits.** Each API key, and each calling address, may send only so many requests in a
+      short
+
+      time; past that, a request is refused with `429 rate_limited` before it does anything, so it
+      is
+
+      always safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at
+      least
+
+      that long, then retry, backing off further if you are refused again. The limits are well above
+
+      normal use and may change, so do not build to a number.
 
 
       Every response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us
@@ -882,6 +898,8 @@ paths:
           $ref: "#/components/responses/Conflict"
         "422":
           $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
     get:
       operationId: findApplicationByPartnerReference
       security:
@@ -1022,6 +1040,8 @@ paths:
                 $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/applications/{applicationId}:
     get:
       operationId: getApplication
@@ -1152,6 +1172,8 @@ paths:
                 $ref: "#/components/schemas/ScopeProblem"
         "404":
           $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/applications/{applicationId}/amendments:
     post:
       operationId: amendApplication
@@ -1439,6 +1461,8 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "422":
           $ref: "#/components/responses/Unprocessable"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "501":
           description: Not yet available.
           content:
@@ -1546,6 +1570,8 @@ paths:
                     detail: The application has ended.
               schema:
                 $ref: "#/components/schemas/Problem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/applications/{applicationId}/fulfil:
     post:
       operationId: fulfilApplication
@@ -1666,6 +1692,8 @@ paths:
             application/problem+json:
               schema:
                 $ref: "#/components/schemas/FulfilConflictProblem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
         "501":
           description: Not yet available.
           content:
@@ -2250,6 +2278,28 @@ components:
         - status
         - code
       title: QuoteProblem
+    RateLimitedProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: number
+          const: 429
+        detail:
+          type: string
+        code:
+          type: string
+          const: rate_limited
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: RateLimitedProblem
     CreateApplicationRequest:
       type: object
       properties:
@@ -2604,3 +2654,28 @@ components:
                 detail: No finance product is available for this quote at the moment.
           schema:
             $ref: "#/components/schemas/QuoteProblem"
+    TooManyRequests:
+      description: "rate_limited: too many requests in a short time. Nothing was done. Wait at least
+        Retry-After seconds, then retry."
+      headers:
+        Retry-After:
+          schema:
+            type: string
+            pattern: ^[1-9][0-9]*$
+            description: Whole seconds to wait before retrying.
+            example: "1"
+          required: true
+          description: Whole seconds to wait before retrying.
+      content:
+        application/problem+json:
+          examples:
+            rateLimited:
+              summary: Too many requests in a short time; wait for Retry-After
+              value:
+                type: about:blank
+                title: Too Many Requests
+                status: 429
+                code: rate_limited
+                detail: Too many requests. Wait for the time in Retry-After, then try again.
+          schema:
+            $ref: "#/components/schemas/RateLimitedProblem"
