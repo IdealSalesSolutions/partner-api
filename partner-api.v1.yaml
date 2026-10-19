@@ -167,6 +167,56 @@ tags:
 
       with `getApplication` to catch up; Ideal can replay any event.
     x-traitTag: true
+  - name: return-addresses
+    x-displayName: Return addresses
+    description: >-
+      At the end of the journey we can send the customer back to your site, to one of two addresses
+      a
+
+      partner admin sets in the partner admin. There is no API endpoint for them.
+
+
+      - **Success address**: where we send a customer after they sign their credit agreement.
+
+      - **Failure address**: where we send a customer whose application is declined.
+
+
+      No other ending sends the customer back, and either address may be left empty, in which case
+      we
+
+      do not offer the way back for that ending. Each must be an `https` address on the standard
+      port
+
+      (443): no other port, and no name or password before the host.
+
+
+      **The placeholder.** Put `{{ref}}` where your `partnerReference` goes, at most once, in the
+      path
+
+      or the query, never in the host. We replace it with the reference, URL-encoded, so a reference
+
+      such as `PB 1/2&3` arrives as `PB%201%2F2%263`:
+
+
+      ```text
+
+      https://www.example.com/finance/done?ref={{ref}}
+
+      https://www.example.com/finance/done?ref=PB-12345
+
+      ```
+
+
+      Nothing else is added to the address, and nothing about the customer is put in it. A reference
+
+      of `.` or `..` would change the address's path, so for one of those we do not offer the way
+      back.
+
+
+      **Arriving is not proof.** Anyone can open either address, with any reference. Confirm the
+
+      outcome from the webhook, or with `getApplication`, before acting on it.
+    x-traitTag: true
   - name: errors
     x-displayName: Errors
     description: >-
@@ -251,6 +301,7 @@ x-tagGroups:
       - money
       - webhook-signatures
       - idempotency
+      - return-addresses
       - errors
   - name: API
     tags:
