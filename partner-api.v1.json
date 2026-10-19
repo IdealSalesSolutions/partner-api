@@ -23,7 +23,7 @@
     {
       "name": "getting-started",
       "x-displayName": "Getting started",
-      "description": "1. **Get an API key.** A partner admin creates keys in the partner admin, choosing each key's\n   scopes (`applications:create`, `applications:read`, `applications:amend`) and, optionally,\n   the IP ranges it may be used from. The key is shown once. Send it on every request as\n   `Authorization: Bearer <key>`. The server in this page is a placeholder: use the base URL you\n   are given, which ends in `/partner`. Every path here, such as `/v1/applications`, follows it.\n2. **Create the application** with `POST /v1/applications`: your `partnerReference`, the customer,\n   the property and the quote. A `201` returns the Application and a `handoffUrl`.\n3. **Send the customer to `handoffUrl`.** It works once and expires 30 minutes after it is issued.\n   For another, call `issueHandoff` (or repeat the create): each call issues a new one.\n4. **Receive webhooks.** A partner admin registers an https URL and creates the signing secret in\n   the partner admin. Each status change and each amend is POSTed there, signed: see\n   *Verifying webhook signatures*. Read the full Application with `getApplication` at any time.",
+      "description": "1. **Get an API key.** A partner admin creates keys in the partner admin, choosing each key's\n   scopes (`applications:create`, `applications:read`, `applications:amend`) and, optionally,\n   the IP ranges it may be used from. The key is shown once. Send it on every request as\n   `Authorization: Bearer <key>`. The server in this page is a placeholder: use the base URL you\n   are given, which ends in `/partner`. Every path here, such as `/v1/applications`, follows it.\n2. **Create the application** with `POST /v1/applications`: your `partnerReference`, the customer,\n   the property and the quote. A `201` returns the Application and a `handoffUrl`.\n3. **Send the customer to `handoffUrl`.** It works once and expires 30 minutes after it is issued.\n   For another, call `issueHandoff` (or repeat the create): each call issues a new one.\n4. **Receive webhooks.** A partner admin registers an https URL on port 443, the default (no other\n   port is accepted), and creates the signing secret in the partner admin. Each status change and each amend is POSTed there, signed: see\n   *Verifying webhook signatures*. Read the full Application with `getApplication` at any time.",
       "x-traitTag": true
     },
     {
@@ -1716,6 +1716,10 @@
               "amended": {
                 "summary": "application.amended",
                 "value": "t=1791799364,v1=33281152afbfde5625cdc9ef277c0f1090d479b0888569892d6b483c8d950e60"
+              },
+              "test": {
+                "summary": "webhook.test (test only)",
+                "value": "t=1792404900,v1=45cff1c062905d67551d70b1c19d6ccf9283c630a564f460b6dbc7a1efaf2e31"
               }
             },
             "name": "X-Signature",
@@ -1764,6 +1768,15 @@
                       }
                     }
                   }
+                },
+                "test": {
+                  "summary": "webhook.test (test only)",
+                  "value": {
+                    "eventId": "5d1a7c3e-2b4f-4a6d-9e81-7c0f3b2a6d45",
+                    "type": "webhook.test",
+                    "occurredAt": "2026-10-19T10:15:00.000Z",
+                    "message": "This is a test from Ideal, sent because a member of your team pressed Send test. It carries no application or customer data."
+                  }
                 }
               },
               "schema": {
@@ -1796,13 +1809,17 @@
           },
           {
             "$ref": "#/components/schemas/AmendedEvent"
+          },
+          {
+            "$ref": "#/components/schemas/TestEvent"
           }
         ],
         "discriminator": {
           "propertyName": "type",
           "mapping": {
             "application.status_changed": "#/components/schemas/StatusChangedEvent",
-            "application.amended": "#/components/schemas/AmendedEvent"
+            "application.amended": "#/components/schemas/AmendedEvent",
+            "webhook.test": "#/components/schemas/TestEvent"
           }
         },
         "title": "WebhookEvent"
@@ -1958,6 +1975,37 @@
           "currency"
         ],
         "title": "Money"
+      },
+      "TestEvent": {
+        "type": "object",
+        "properties": {
+          "eventId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "This test's own id. A test is sent once: it is never retried or replayed."
+          },
+          "type": {
+            "type": "string",
+            "const": "webhook.test"
+          },
+          "occurredAt": {
+            "type": "string",
+            "format": "date-time",
+            "description": "When the test was asked for."
+          },
+          "message": {
+            "type": "string",
+            "description": "The same fixed sentence on every test."
+          }
+        },
+        "required": [
+          "eventId",
+          "type",
+          "occurredAt",
+          "message"
+        ],
+        "title": "TestEvent",
+        "description": "Test only: sent once, and only when a member of your team presses Send test beside your webhook URL in the partner admin, so you can check you receive webhooks and verify their signature. It is signed exactly as every other event, carries no application or customer, and is never retried or listed among your deliveries. Answer it as any other event; it changes nothing."
       },
       "CreatedApplication": {
         "allOf": [
