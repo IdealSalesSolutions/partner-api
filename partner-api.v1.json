@@ -23,7 +23,7 @@
     {
       "name": "getting-started",
       "x-displayName": "Getting started",
-      "description": "1. **Get an API key.** A partner admin creates keys in the partner admin, choosing each key's\n   scopes (`applications:create`, `applications:read`, `applications:amend`) and, optionally,\n   the IP ranges it may be used from. The key is shown once. Send it on every request as\n   `Authorization: Bearer <key>`. The server in this page is a placeholder: use the base URL you\n   are given, which ends in `/partner`. Every path here, such as `/v1/applications`, follows it.\n2. **Create the application** with `POST /v1/applications`: your `partnerReference`, the customer,\n   the property and the quote. A `201` returns the Application and a `handoffUrl`.\n3. **Send the customer to `handoffUrl`.** It works once and expires 30 minutes after it is issued.\n   For another, call `issueHandoff` (or repeat the create): each call issues a new one.\n4. **Receive webhooks.** A partner admin registers an https URL on port 443, the default (no other\n   port is accepted), and creates the signing secret in the partner admin. Each status change and each amend is POSTed there, signed: see\n   *Verifying webhook signatures*. Read the full Application with `getApplication` at any time.",
+      "description": "1. **Get an API key.** A partner admin creates keys in the partner admin, choosing each key's\n   scopes (`applications:create`, `applications:read`, `applications:amend`) and, optionally,\n   the IP ranges it may be used from. The key is shown once. Send it on every request as\n   `Authorization: Bearer <key>`. The server in this page is a placeholder: use the base URL you\n   are given, which ends in `/partner`. Every path here, such as `/v1/applications`, follows it.\n2. **Create the application** with `POST /v1/applications`: your `partnerReference`, the customer,\n   the property and the quote. A `201` returns the Application and a `handoffUrl`.\n3. **Send the customer to `handoffUrl`.** It works once and expires 30 minutes after it is issued.\n   For another, call `issueHandoff`: each URL issued stops the earlier unused ones working, and a\n   customer already in the journey stays in it.\n4. **Receive webhooks.** A partner admin registers an https URL on port 443, the default (no other\n   port is accepted), and creates the signing secret in the partner admin. Each status change and each amend is POSTed there, signed: see\n   *Verifying webhook signatures*. Read the full Application with `getApplication` at any time.",
       "x-traitTag": true
     },
     {
@@ -35,30 +35,41 @@
     {
       "name": "webhook-signatures",
       "x-displayName": "Verifying webhook signatures",
-      "description": "Each delivery carries `X-Signature: t=<unix seconds>,v1=<hex>`. To verify it:\n\n1. Take the request body's raw bytes, **before** parsing the JSON (re-serialising changes them).\n2. Compute HMAC-SHA256, keyed with your webhook secret (the whole string shown, `whsec_`\n   included, as UTF-8), over `t`, a full stop, then the raw body.\n3. Compare its lowercase hex with each `v1` in constant time. Accept the delivery only if one\n   matches and `t` is within 5 minutes of your clock, either side.\n\nFor 24 hours after you rotate the secret, the header carries two `v1` entries, one per secret.\n\n**Worked example.** With the example secret `whsec_example_do_not_use` and this raw body:\n\n```\n{\"eventId\":\"0b6f3c1e-7d2a-4f58-9c41-3e8a5d2b7f90\",\"type\":\"application.status_changed\",\"occurredAt\":\"2026-10-12T09:41:07.000Z\",\"applicationId\":\"5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10\",\"partnerReference\":\"PB-104231\",\"from\":\"created\",\"to\":\"in_progress\"}\n```\n\nthe signed string is `1791798067.` followed by that body, and the header is:\n\n```\nX-Signature: t=1791798067,v1=5cd52388091b18ca49ccffe17dd8d15475426045c29dcf9bd45ea48d1bebef53\n```\n\nso the HMAC's hex is `5cd52388091b18ca49ccffe17dd8d15475426045c29dcf9bd45ea48d1bebef53`.\n\n**Node:**\n\n```js\nimport { createHmac, timingSafeEqual } from \"node:crypto\";\n\n// header: X-Signature. rawBody: the request body's bytes, before any JSON parsing (a Buffer).\nexport function verifySignature(header, rawBody, secret, nowSeconds = Math.floor(Date.now() / 1000)) {\n  const parts = header.split(\",\").map((p) => p.split(\"=\"));\n  const t = parts.find(([k]) => k === \"t\")?.[1];\n  if (!t || !/^\\d+$/.test(t) || Math.abs(nowSeconds - Number(t)) > 300) return false;\n  const expected = createHmac(\"sha256\", Buffer.from(secret, \"utf8\"))\n    .update(Buffer.concat([Buffer.from(`${t}.`, \"utf8\"), rawBody]))\n    .digest();\n  return parts\n    .filter(([k, v]) => k === \"v1\" && /^[0-9a-f]{64}$/.test(v ?? \"\"))\n    .some(([, v]) => timingSafeEqual(Buffer.from(v, \"hex\"), expected));\n}\n```\n\nAnswer `2XX` within 10 seconds. Every retry and replay of an event has the\nsame `eventId`: use it to ignore a delivery you have already handled.",
+      "description": "Each delivery carries `X-Signature: t=<unix seconds>,v1=<hex>`. To verify it:\n\n1. Take the request body's raw bytes, **before** parsing the JSON (re-serialising changes them).\n2. Compute HMAC-SHA256, keyed with your webhook secret (the whole string shown, `whsec_`\n   included, as UTF-8), over `t`, a full stop, then the raw body.\n3. Compare its lowercase hex with each `v1` in constant time. Accept the delivery only if one\n   matches and `t` is within 5 minutes of your clock, either side.\n\nFor 24 hours after you rotate the secret, the header carries two `v1` entries, one per secret.\n\n**Worked example.** With the example secret `whsec_example_do_not_use` and this raw body:\n\n```\n{\"eventId\":\"0b6f3c1e-7d2a-4f58-9c41-3e8a5d2b7f90\",\"type\":\"application.status_changed\",\"occurredAt\":\"2026-10-12T09:41:07.000Z\",\"applicationId\":\"5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10\",\"partnerReference\":\"PF-104231\",\"from\":\"created\",\"to\":\"in_progress\"}\n```\n\nthe signed string is `1791798067.` followed by that body, and the header is:\n\n```\nX-Signature: t=1791798067,v1=31411dc8e819bbb2fb9d1deeaa6f29d4631016972b2914bb15e729912ce9cba1\n```\n\nso the HMAC's hex is `31411dc8e819bbb2fb9d1deeaa6f29d4631016972b2914bb15e729912ce9cba1`.\n\n**Node:**\n\n```js\nimport { createHmac, timingSafeEqual } from \"node:crypto\";\n\n// header: X-Signature. rawBody: the request body's bytes, before any JSON parsing (a Buffer).\nexport function verifySignature(header, rawBody, secret, nowSeconds = Math.floor(Date.now() / 1000)) {\n  const parts = header.split(\",\").map((p) => p.split(\"=\"));\n  const t = parts.find(([k]) => k === \"t\")?.[1];\n  if (!t || !/^\\d+$/.test(t) || Math.abs(nowSeconds - Number(t)) > 300) return false;\n  const expected = createHmac(\"sha256\", Buffer.from(secret, \"utf8\"))\n    .update(Buffer.concat([Buffer.from(`${t}.`, \"utf8\"), rawBody]))\n    .digest();\n  return parts\n    .filter(([k, v]) => k === \"v1\" && /^[0-9a-f]{64}$/.test(v ?? \"\"))\n    .some(([, v]) => timingSafeEqual(Buffer.from(v, \"hex\"), expected));\n}\n```\n\nAnswer `2XX` within 10 seconds. Every retry and replay of an event has the\nsame `eventId`: use it to ignore a delivery you have already handled.",
+      "x-traitTag": true
+    },
+    {
+      "name": "finance-options-guide",
+      "x-displayName": "Showing finance options at checkout",
+      "description": "**Read the options for the amount** with `GET /v1/finance-options?amount=<pence>`, the quote's\ntotal including VAT in whole pence, with a key that has `applications:create`. You get the options\nyour customers can choose from now for that amount, in the order to show them: the same ones the\ncustomer's journey offers for an application of that amount. An option whose `minAmount` to\n`maxAmount` does not cover the amount is left out, and `items` is empty when none does.\n\n**Show only the option's name and shape.** Each option has a `displayName`, `termMonths` and\n`deferralMonths` (`0` for none). For example *Pay later: 6 months deferred, then 36 monthly payments* has `deferralMonths`\n`6` and `termMonths` `36`. Show the `displayName` as it is,\nor the number of payments and the months with nothing to pay, and nothing else: no rate, no APR, no\npayment or total, and no claim about interest or cost, whether from these fields, `type` or your\nown working. A rate or cost shown at your checkout would need a representative example beside it,\nwhich only the lender's figures can give. Send the customer to the `handoffUrl`, where we show them\nthe costs, for anything more.\n\n**Figures will come with a representative example.** `monthlyPayment` and `totalPayable` are\nalways `null` for now, and no rate is given. When the lender's own figures can be given here, the\nrate and costs will come with the representative example they must be shown with, and this guide\nwill say how to show them.\n\n**Send the customer's choice** as `optionId` on `createApplication`, or in the body of\n`issueHandoff` (sent as `application/json`; another body is refused with `400 bad_request`).\nLeave it out and nothing changes: the customer chooses in the journey. The journey opens on the option\nyou send unless the customer has already chosen, and they can still choose another. An `optionId`\nis taken only while the application is `created` and the customer has not chosen an option\nthemselves. After that, the option already chosen is accepted, so a replay is safe, and any other is\nrefused with `409 invalid_state`: your call never undoes the customer's choice. The `optionId` must\nbe one `listFinanceOptions` returns for the application's amount now; otherwise the request is\nrefused with `422 product_unavailable` naming `optionId`. A refused `optionId` creates or changes\nnothing, so read the options again and offer those. An `optionId` is ours and opaque: a change to an\noption's terms gives it a new one, so read the options for each checkout rather than keeping them.",
       "x-traitTag": true
     },
     {
       "name": "idempotency",
       "x-displayName": "Idempotency and retries",
-      "description": "**createApplication is idempotent on `partnerReference`.** If a create times out, send the same\nrequest again. For a `partnerReference` you have already used:\n\n- with the same customer email, it answers `200` with the Application and a fresh `handoffUrl`,\n  creating nothing. A changed title, name, mobile or property updates what we hold.\n- with a different customer email, it is refused with `409 email_conflict`.\n- with a changed quote, it is an amend: the key needs `applications:amend` as well (otherwise\n  `403 insufficient_scope`, nothing changed), and the application must be created or in progress\n  (otherwise `409 invalid_state`).\n- once the application has ended (declined, withdrawn, cancelled, expired or paid out), it is\n  refused with `409 invalid_state`.\n\n**amendApplication replaces the whole quote.** It answers `201` while the application is created\nor in progress. From submitted or approved an amend will move the application back to in progress;\nthat is not yet available and answers `501`. From any other status it is refused with\n`409 invalid_state`.\n\n**fulfilApplication** takes an `Idempotency-Key`; its rules are on the operation. It answers\n`501` until it is available.\n\n**Webhooks** are retried with growing gaps for 24 hours, then marked failed. Read the application\nwith `getApplication` to catch up; Ideal can replay any event.",
+      "description": "**createApplication is idempotent on `partnerReference`.** If a create times out, send the same\nrequest again. For a `partnerReference` you have already used:\n\n- with the same customer email, it answers `200` with the Application and a fresh `handoffUrl`,\n  creating nothing; the earlier unused `handoffUrl` stops working.\n- with a different title, name, mobile or property, it is refused with `409 details_differ` and\n  changes nothing: those details are fixed by the first create, and only the customer corrects them,\n  in the journey. For a fresh `handoffUrl` without sending the application again, call\n  `issueHandoff`.\n- with a different customer email, it is refused with `409 email_conflict`.\n- with a changed quote, it is an amend: the key needs `applications:amend` as well (otherwise\n  `403 insufficient_scope`, nothing changed), and the application must be created or in progress\n  (otherwise `409 invalid_state`).\n- once the application has ended (declined, withdrawn, cancelled, expired or paid out), it is\n  refused with `409 invalid_state`.\n\n**amendApplication replaces the whole quote.** It answers `201` while the application is created\nor in progress. From submitted or approved an amend will move the application back to in progress;\nthat is not yet available and answers `501`. From any other status it is refused with\n`409 invalid_state`.\n\n**fulfilApplication** takes an `Idempotency-Key`; its rules are on the operation. It answers\n`501` until it is available.\n\n**Webhooks** are retried with growing gaps for 24 hours, then marked failed. Read the application\nwith `getApplication` to catch up; Ideal can replay any event.",
       "x-traitTag": true
     },
     {
       "name": "return-addresses",
       "x-displayName": "Return addresses",
-      "description": "At the end of the journey we can send the customer back to your site, to one of two addresses a\npartner admin sets in the partner admin. There is no API endpoint for them.\n\n- **Success address**: where we send a customer after they sign their credit agreement.\n- **Failure address**: where we send a customer whose application is declined.\n\nNo other ending sends the customer back, and either address may be left empty, in which case we\ndo not offer the way back for that ending. Each must be an `https` address on the standard port\n(443): no other port, and no name or password before the host.\n\n**The placeholder.** Put `{{ref}}` where your `partnerReference` goes, at most once, in the path\nor the query, never in the host. We replace it with the reference, URL-encoded, so a reference\nsuch as `PB 1/2&3` arrives as `PB%201%2F2%263`:\n\n```text\nhttps://www.example.com/finance/done?ref={{ref}}\nhttps://www.example.com/finance/done?ref=PB-12345\n```\n\nNothing else is added to the address, and nothing about the customer is put in it. A reference\nof `.` or `..` would change the address's path, so for one of those we do not offer the way back.\n\n**Arriving is not proof.** Anyone can open either address, with any reference. Confirm the\noutcome from the webhook, or with `getApplication`, before acting on it.",
+      "description": "At the end of the journey we can send the customer back to your site, to one of two addresses a\npartner admin sets in the partner admin. There is no API endpoint for them.\n\n- **Success address**: where we send a customer after they sign their credit agreement.\n- **Failure address**: where we send a customer whose application is declined.\n\nNo other ending sends the customer back, and either address may be left empty, in which case we\ndo not offer the way back for that ending. Each must be an `https` address on the standard port\n(443): no other port, and no name or password before the host.\n\n**The placeholder.** Put `{{ref}}` where your `partnerReference` goes, at most once, in the path\nor the query, never in the host. We replace it with the reference, URL-encoded, so a reference\nsuch as `PF 1/2&3` arrives as `PF%201%2F2%263`:\n\n```text\nhttps://www.example.com/finance/done?ref={{ref}}\nhttps://www.example.com/finance/done?ref=PF-12345\n```\n\nNothing else is added to the address, and nothing about the customer is put in it. A reference\nof `.` or `..` would change the address's path, so for one of those we do not offer the way back.\n\n**Arriving is not proof.** Anyone can open either address, with any reference. Confirm the\noutcome from the webhook, or with `getApplication`, before acting on it.",
       "x-traitTag": true
     },
     {
       "name": "errors",
       "x-displayName": "Errors",
-      "description": "Every error is `application/problem+json`:\n\n```json\n{ \"type\": \"about:blank\", \"title\": \"Conflict\", \"status\": 409, \"code\": \"email_conflict\",\n  \"detail\": \"This partnerReference belongs to a different customer.\" }\n```\n\nBranch on `status` and `code`. `title` and `detail` are written for people and may change;\n`detail` is sometimes absent.\n\n| Status | code | When |\n|---|---|---|\n| 400 | `bad_request` | The request does not match the contract. `detail` usually lists each problem in the first part of the request that fails (query, path, headers, then body) as `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param` or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse after those checks, get a sentence instead. |\n| 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP ranges. |\n| 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs (`detail` names it), or a create replay changes the quote and the key lacks `applications:amend`. Nothing was written. |\n| 404 | `not_found` | No application of yours has that id or `partnerReference`. |\n| 409 | `email_conflict`, `invalid_state`, `idempotency_key_conflict` | See *Idempotency and retries* and each operation. |\n| 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`, `product_unavailable`, `amount_out_of_bounds` | The quote is refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. |\n| 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |\n| 501 | `not_implemented` | The operation is not yet available. |\n\nEach operation lists its own responses, with an example of each.\n\n**Rate limits.** Each API key, and each calling address, may send only so many requests in a short\ntime; past that, a request is refused with `429 rate_limited` before it does anything, so it is\nalways safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at least\nthat long, then retry, backing off further if you are refused again. The limits are well above\nnormal use and may change, so do not build to a number.\n\nEvery response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us about\na request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is\nreplaced with one of ours.",
+      "description": "Every error is `application/problem+json`:\n\n```json\n{ \"type\": \"about:blank\", \"title\": \"Conflict\", \"status\": 409, \"code\": \"email_conflict\",\n  \"detail\": \"This partnerReference belongs to a different customer.\" }\n```\n\nBranch on `status` and `code`. `title` and `detail` are written for people and may change;\n`detail` is sometimes absent.\n\n| Status | code | When |\n|---|---|---|\n| 400 | `bad_request` | The request does not match the contract. `detail` usually lists each problem in the first part of the request that fails (query, path, headers, then body) as `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param` or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse after those checks, get a sentence instead. |\n| 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP ranges. |\n| 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs (`detail` names it), or a create replay changes the quote and the key lacks `applications:amend`. Nothing was written. |\n| 404 | `not_found` | No application of yours has that id or `partnerReference`. |\n| 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict` | See *Idempotency and retries*, *Showing finance options at checkout* and each operation. |\n| 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`, `product_unavailable`, `amount_out_of_bounds` | The quote is refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. `product_unavailable` naming `optionId` refuses the option sent: see *Showing finance options at checkout*. |\n| 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |\n| 501 | `not_implemented` | The operation is not yet available. |\n\nEach operation lists its own responses, with an example of each.\n\n**Rate limits.** Each API key, and each calling address, may send only so many requests in a short\ntime; past that, a request is refused with `429 rate_limited` before it does anything, so it is\nalways safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at least\nthat long, then retry, backing off further if you are refused again. The limits are well above\nnormal use and may change, so do not build to a number.\n\nEvery response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us about\na request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is\nreplaced with one of ours.",
       "x-traitTag": true
     },
     {
       "name": "applications",
       "description": "Applications."
+    },
+    {
+      "name": "finance-options",
+      "x-displayName": "Finance options",
+      "description": "The finance options you can show at checkout."
     },
     {
       "name": "webhooks",
@@ -84,12 +95,12 @@
           {
             "lang": "curl",
             "label": "curl",
-            "source": "curl -X POST 'https://api.example.invalid/partner/v1/applications' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\" \\\n  -H 'Content-Type: application/json' \\\n  --data '{\n  \"partnerReference\": \"PB-104231\",\n  \"customer\": {\n    \"title\": \"ms\",\n    \"firstName\": \"Jane\",\n    \"lastName\": \"Seller\",\n    \"email\": \"jane.seller@example.com\",\n    \"mobile\": \"+447700900123\"\n  },\n  \"property\": {\n    \"flat\": \"Flat 2\",\n    \"buildingName\": \"Mill House\",\n    \"buildingNumber\": \"22\",\n    \"line1\": \"Mill Lane\",\n    \"town\": \"York\",\n    \"postcode\": \"YO1 7HH\",\n    \"country\": \"GB\"\n  },\n  \"quote\": {\n    \"items\": [\n      {\n        \"title\": \"Standard listing\",\n        \"description\": \"Includes:\\n- Listing on the major property portals\\n- For-sale board\",\n        \"quantity\": 100,\n        \"unitPrice\": {\n          \"amount\": 99900,\n          \"currency\": \"GBP\"\n        },\n        \"vatRate\": \"20%\",\n        \"vat\": {\n          \"amount\": 19980,\n          \"currency\": \"GBP\"\n        }\n      }\n    ],\n    \"expectedTotal\": {\n      \"amount\": 119880,\n      \"currency\": \"GBP\"\n    }\n  }\n}'"
+            "source": "curl -X POST 'https://api.example.invalid/partner/v1/applications' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\" \\\n  -H 'Content-Type: application/json' \\\n  --data '{\n  \"partnerReference\": \"PF-104231\",\n  \"customer\": {\n    \"title\": \"ms\",\n    \"firstName\": \"Jane\",\n    \"lastName\": \"Seller\",\n    \"email\": \"jane.seller@example.com\",\n    \"mobile\": \"+447700900123\"\n  },\n  \"property\": {\n    \"flat\": \"Flat 2\",\n    \"buildingName\": \"Mill House\",\n    \"buildingNumber\": \"22\",\n    \"line1\": \"Mill Lane\",\n    \"town\": \"York\",\n    \"postcode\": \"YO1 7HH\",\n    \"country\": \"GB\"\n  },\n  \"quote\": {\n    \"items\": [\n      {\n        \"title\": \"Standard listing\",\n        \"description\": \"Includes:\\n- Listing on the major property portals\\n- For-sale board\",\n        \"quantity\": 100,\n        \"unitPrice\": {\n          \"amount\": 99900,\n          \"currency\": \"GBP\"\n        },\n        \"vatRate\": \"20%\",\n        \"vat\": {\n          \"amount\": 19980,\n          \"currency\": \"GBP\"\n        }\n      }\n    ],\n    \"expectedTotal\": {\n      \"amount\": 119880,\n      \"currency\": \"GBP\"\n    }\n  }\n}'"
           },
           {
             "lang": "JavaScript",
             "label": "Node (fetch)",
-            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n    \"Content-Type\": \"application/json\",\n  },\n  body: JSON.stringify({\n    \"partnerReference\": \"PB-104231\",\n    \"customer\": {\n      \"title\": \"ms\",\n      \"firstName\": \"Jane\",\n      \"lastName\": \"Seller\",\n      \"email\": \"jane.seller@example.com\",\n      \"mobile\": \"+447700900123\"\n    },\n    \"property\": {\n      \"flat\": \"Flat 2\",\n      \"buildingName\": \"Mill House\",\n      \"buildingNumber\": \"22\",\n      \"line1\": \"Mill Lane\",\n      \"town\": \"York\",\n      \"postcode\": \"YO1 7HH\",\n      \"country\": \"GB\"\n    },\n    \"quote\": {\n      \"items\": [\n        {\n          \"title\": \"Standard listing\",\n          \"description\": \"Includes:\\n- Listing on the major property portals\\n- For-sale board\",\n          \"quantity\": 100,\n          \"unitPrice\": {\n            \"amount\": 99900,\n            \"currency\": \"GBP\"\n          },\n          \"vatRate\": \"20%\",\n          \"vat\": {\n            \"amount\": 19980,\n            \"currency\": \"GBP\"\n          }\n        }\n      ],\n      \"expectedTotal\": {\n        \"amount\": 119880,\n        \"currency\": \"GBP\"\n      }\n    }\n  }),\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
+            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n    \"Content-Type\": \"application/json\",\n  },\n  body: JSON.stringify({\n    \"partnerReference\": \"PF-104231\",\n    \"customer\": {\n      \"title\": \"ms\",\n      \"firstName\": \"Jane\",\n      \"lastName\": \"Seller\",\n      \"email\": \"jane.seller@example.com\",\n      \"mobile\": \"+447700900123\"\n    },\n    \"property\": {\n      \"flat\": \"Flat 2\",\n      \"buildingName\": \"Mill House\",\n      \"buildingNumber\": \"22\",\n      \"line1\": \"Mill Lane\",\n      \"town\": \"York\",\n      \"postcode\": \"YO1 7HH\",\n      \"country\": \"GB\"\n    },\n    \"quote\": {\n      \"items\": [\n        {\n          \"title\": \"Standard listing\",\n          \"description\": \"Includes:\\n- Listing on the major property portals\\n- For-sale board\",\n          \"quantity\": 100,\n          \"unitPrice\": {\n            \"amount\": 99900,\n            \"currency\": \"GBP\"\n          },\n          \"vatRate\": \"20%\",\n          \"vat\": {\n            \"amount\": 19980,\n            \"currency\": \"GBP\"\n          }\n        }\n      ],\n      \"expectedTotal\": {\n        \"amount\": 119880,\n        \"currency\": \"GBP\"\n      }\n    }\n  }),\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
           }
         ],
         "requestBody": {
@@ -100,7 +111,7 @@
                 "oneListingFee": {
                   "summary": "One listing fee",
                   "value": {
-                    "partnerReference": "PB-104231",
+                    "partnerReference": "PF-104231",
                     "customer": {
                       "title": "ms",
                       "firstName": "Jane",
@@ -144,7 +155,7 @@
                 "packageWithAddOns": {
                   "summary": "Package plus add-ons with a percentage discount",
                   "value": {
-                    "partnerReference": "PB-104232",
+                    "partnerReference": "PF-104232",
                     "customer": {
                       "title": "ms",
                       "firstName": "Jane",
@@ -221,7 +232,7 @@
                 "amountDiscount": {
                   "summary": "Amount discount",
                   "value": {
-                    "partnerReference": "PB-104233",
+                    "partnerReference": "PF-104233",
                     "customer": {
                       "title": "ms",
                       "firstName": "Jane",
@@ -272,7 +283,7 @@
                 "replay": {
                   "summary": "Replay with the same reference",
                   "value": {
-                    "partnerReference": "PB-104231",
+                    "partnerReference": "PF-104231",
                     "customer": {
                       "title": "ms",
                       "firstName": "Jane",
@@ -312,6 +323,51 @@
                       }
                     }
                   }
+                },
+                "withOption": {
+                  "summary": "With the finance option the customer chose at your checkout",
+                  "value": {
+                    "partnerReference": "PF-104234",
+                    "customer": {
+                      "title": "ms",
+                      "firstName": "Jane",
+                      "lastName": "Seller",
+                      "email": "jane.seller@example.com",
+                      "mobile": "+447700900123"
+                    },
+                    "property": {
+                      "flat": "Flat 2",
+                      "buildingName": "Mill House",
+                      "buildingNumber": "22",
+                      "line1": "Mill Lane",
+                      "town": "York",
+                      "postcode": "YO1 7HH",
+                      "country": "GB"
+                    },
+                    "quote": {
+                      "items": [
+                        {
+                          "title": "Standard listing",
+                          "description": "Includes:\n- Listing on the major property portals\n- For-sale board",
+                          "quantity": 100,
+                          "unitPrice": {
+                            "amount": 99900,
+                            "currency": "GBP"
+                          },
+                          "vatRate": "20%",
+                          "vat": {
+                            "amount": 19980,
+                            "currency": "GBP"
+                          }
+                        }
+                      ],
+                      "expectedTotal": {
+                        "amount": 119880,
+                        "currency": "GBP"
+                      }
+                    },
+                    "optionId": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90"
+                  }
                 }
               },
               "schema": {
@@ -322,7 +378,7 @@
         },
         "responses": {
           "200": {
-            "description": "An Application already exists for this partnerReference and customer email. A changed quote is an amend: it needs the applications:amend scope as well (otherwise 403 insufficient_scope), and replaces the Quote in force while the application is created or in progress (otherwise 409 invalid_state). A changed title, name, mobile or property updates what we hold. Each call returns a fresh handoffUrl. Once the application has ended (declined, withdrawn, cancelled, expired or paid out) the call is refused with 409 invalid_state and no handoffUrl is issued.",
+            "description": "An Application already exists for this partnerReference and customer email. A changed quote is an amend: it needs the applications:amend scope as well (otherwise 403 insufficient_scope), and replaces the Quote in force while the application is created or in progress (otherwise 409 invalid_state). The customer's title, name and mobile and the property must be those the first create sent: other details are refused with 409 details_differ and change nothing. Each call returns a fresh handoffUrl, and every earlier unused one stops working. Once the application has ended (declined, withdrawn, cancelled, expired or paid out) the call is refused with 409 invalid_state and no handoffUrl is issued.",
             "content": {
               "application/json": {
                 "examples": {
@@ -330,7 +386,7 @@
                     "summary": "Replay with the same reference",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104231",
+                      "partnerReference": "PF-104231",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -397,7 +453,7 @@
                         "fulfilledAt": null,
                         "paidOutAt": null
                       },
-                      "handoffUrl": "https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
                     }
                   }
                 },
@@ -416,7 +472,7 @@
                     "summary": "One listing fee",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104231",
+                      "partnerReference": "PF-104231",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -483,14 +539,14 @@
                         "fulfilledAt": null,
                         "paidOutAt": null
                       },
-                      "handoffUrl": "https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
                     }
                   },
                   "packageWithAddOns": {
                     "summary": "Package plus add-ons with a percentage discount",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104232",
+                      "partnerReference": "PF-104232",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -602,14 +658,14 @@
                         "fulfilledAt": null,
                         "paidOutAt": null
                       },
-                      "handoffUrl": "https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
                     }
                   },
                   "amountDiscount": {
                     "summary": "Amount discount",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104233",
+                      "partnerReference": "PF-104233",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -682,7 +738,81 @@
                         "fulfilledAt": null,
                         "paidOutAt": null
                       },
-                      "handoffUrl": "https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
+                    }
+                  },
+                  "withOption": {
+                    "summary": "With the finance option the customer chose at your checkout",
+                    "value": {
+                      "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
+                      "partnerReference": "PF-104234",
+                      "status": "created",
+                      "customer": {
+                        "title": "ms",
+                        "firstName": "Jane",
+                        "lastName": "Seller",
+                        "email": "jane.seller@example.com",
+                        "mobile": "+447700900123"
+                      },
+                      "property": {
+                        "flat": "Flat 2",
+                        "buildingName": "Mill House",
+                        "buildingNumber": "22",
+                        "line1": "Mill Lane",
+                        "town": "York",
+                        "postcode": "YO1 7HH",
+                        "country": "GB",
+                        "line2": null,
+                        "line3": null,
+                        "county": null,
+                        "uprn": null
+                      },
+                      "quote": {
+                        "items": [
+                          {
+                            "description": "Includes:\n- Listing on the major property portals\n- For-sale board",
+                            "quantity": 100,
+                            "discount": null,
+                            "title": "Standard listing",
+                            "unitPrice": {
+                              "amount": 99900,
+                              "currency": "GBP"
+                            },
+                            "vatRate": "20%",
+                            "vat": {
+                              "amount": 19980,
+                              "currency": "GBP"
+                            },
+                            "net": {
+                              "amount": 99900,
+                              "currency": "GBP"
+                            }
+                          }
+                        ],
+                        "total": {
+                          "amountVatExclusive": {
+                            "amount": 99900,
+                            "currency": "GBP"
+                          },
+                          "amountVat": {
+                            "amount": 19980,
+                            "currency": "GBP"
+                          },
+                          "amountVatInclusive": {
+                            "amount": 119880,
+                            "currency": "GBP"
+                          }
+                        },
+                        "createdAt": "2026-10-12T09:30:00.000Z"
+                      },
+                      "timestamps": {
+                        "createdAt": "2026-10-12T09:30:00.000Z",
+                        "updatedAt": "2026-10-12T09:30:00.000Z",
+                        "statusChangedAt": "2026-10-12T09:30:00.000Z",
+                        "fulfilledAt": null,
+                        "paidOutAt": null
+                      },
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR"
                     }
                   }
                 },
@@ -777,12 +907,12 @@
           {
             "lang": "curl",
             "label": "curl",
-            "source": "curl -X GET 'https://api.example.invalid/partner/v1/applications?partnerReference=PB-104231' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\""
+            "source": "curl -X GET 'https://api.example.invalid/partner/v1/applications?partnerReference=PF-104231' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\""
           },
           {
             "lang": "JavaScript",
             "label": "Node (fetch)",
-            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications?partnerReference=PB-104231\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n  },\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
+            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications?partnerReference=PF-104231\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n  },\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
           }
         ],
         "parameters": [
@@ -807,7 +937,7 @@
                     "summary": "One listing fee",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104231",
+                      "partnerReference": "PF-104231",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -980,7 +1110,7 @@
                     "summary": "One listing fee",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104231",
+                      "partnerReference": "PF-104231",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -1206,7 +1336,7 @@
                     "summary": "Replace the quote",
                     "value": {
                       "id": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                      "partnerReference": "PB-104231",
+                      "partnerReference": "PF-104231",
                       "status": "created",
                       "customer": {
                         "title": "ms",
@@ -1424,7 +1554,7 @@
           }
         ],
         "summary": "Get a fresh handoff URL for the customer.",
-        "description": "Each call issues a new single-use URL; earlier ones stay valid until they expire or are used. Refused once the application has ended: declined, withdrawn, cancelled, expired or paid out.",
+        "description": "Each call issues a new single-use URL, and every earlier unused one for the application, from createApplication or this operation, stops working; a customer already in the journey stays in it. Use it for a fresh URL rather than sending createApplication again. Refused once the application has ended: declined, withdrawn, cancelled, expired or paid out.",
         "tags": [
           "applications"
         ],
@@ -1432,12 +1562,12 @@
           {
             "lang": "curl",
             "label": "curl",
-            "source": "curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/handoff' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\""
+            "source": "curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/handoff' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\" \\\n  -H 'Content-Type: application/json' \\\n  --data '{\n  \"optionId\": \"3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90\"\n}'"
           },
           {
             "lang": "JavaScript",
             "label": "Node (fetch)",
-            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/handoff\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n  },\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
+            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/handoff\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n    \"Content-Type\": \"application/json\",\n  },\n  body: JSON.stringify({\n    \"optionId\": \"3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90\"\n  }),\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
           }
         ],
         "parameters": [
@@ -1445,6 +1575,25 @@
             "$ref": "#/components/parameters/ApplicationId"
           }
         ],
+        "requestBody": {
+          "required": false,
+          "description": "Optional, and sent as application/json when there is one. optionId opens the customer's journey on that finance option; without a body nothing but the URL changes.",
+          "content": {
+            "application/json": {
+              "examples": {
+                "withOption": {
+                  "summary": "Open the journey on the option the customer chose",
+                  "value": {
+                    "optionId": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90"
+                  }
+                }
+              },
+              "schema": {
+                "$ref": "#/components/schemas/IssueHandoffRequest"
+              }
+            }
+          }
+        },
         "responses": {
           "201": {
             "description": "A handoff URL was issued.",
@@ -1454,7 +1603,14 @@
                   "issued": {
                     "summary": "A new handoff URL",
                     "value": {
-                      "handoffUrl": "https://api.example.invalid/app/auth/handoff?token=hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR",
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR",
+                      "expiresAt": "2026-10-12T10:00:00.000Z"
+                    }
+                  },
+                  "withOption": {
+                    "summary": "A new handoff URL, the journey opening on the option sent",
+                    "value": {
+                      "handoffUrl": "https://apply.example.invalid/handoff#hT9xQe2LbW7mVr4KsN8pZc3yUf6dGa1JkL5nM0oP2qR",
                       "expiresAt": "2026-10-12T10:00:00.000Z"
                     }
                   }
@@ -1478,6 +1634,16 @@
                       "status": 400,
                       "code": "bad_request",
                       "detail": "param.applicationId: Invalid UUID"
+                    }
+                  },
+                  "notJson": {
+                    "summary": "A body sent without Content-Type: application/json",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "The request does not match the contract",
+                      "status": 400,
+                      "code": "bad_request",
+                      "detail": "Unsupported Media Type"
                     }
                   }
                 },
@@ -1516,7 +1682,7 @@
             "$ref": "#/components/responses/NotFound"
           },
           "409": {
-            "description": "invalid_state when the application has ended.",
+            "description": "invalid_state when the application has ended, or when an optionId other than the one chosen is sent once the application is past created or the customer has chosen.",
             "content": {
               "application/problem+json": {
                 "examples": {
@@ -1528,6 +1694,38 @@
                       "status": 409,
                       "code": "invalid_state",
                       "detail": "The application has ended."
+                    }
+                  },
+                  "optionLocked": {
+                    "summary": "Another optionId once the customer has chosen or started",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "Conflict",
+                      "status": 409,
+                      "code": "invalid_state",
+                      "detail": "The finance option can only change while the application is created and the customer has not chosen one."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "422": {
+            "description": "product_unavailable when optionId is not one of your options for the application's amount now (detail names optionId). Nothing was written.",
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "optionUnavailable": {
+                    "summary": "An optionId that is not one of your options for this amount now (createApplication, issueHandoff)",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "The finance option is unavailable",
+                      "status": 422,
+                      "code": "product_unavailable",
+                      "detail": "optionId: not one of your finance options for this amount now; read listFinanceOptions again"
                     }
                   }
                 },
@@ -1562,12 +1760,12 @@
           {
             "lang": "curl",
             "label": "curl",
-            "source": "curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/fulfil' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\" \\\n  -H 'Idempotency-Key: PB-104231-fulfil-1'"
+            "source": "curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/fulfil' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\" \\\n  -H 'Idempotency-Key: PF-104231-fulfil-1'"
           },
           {
             "lang": "JavaScript",
             "label": "Node (fetch)",
-            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/fulfil\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n    \"Idempotency-Key\": \"PB-104231-fulfil-1\",\n  },\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
+            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/fulfil\", {\n  method: \"POST\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n    \"Idempotency-Key\": \"PF-104231-fulfil-1\",\n  },\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
           }
         ],
         "parameters": [
@@ -1694,6 +1892,178 @@
           }
         }
       }
+    },
+    "/v1/finance-options": {
+      "get": {
+        "operationId": "listFinanceOptions",
+        "security": [
+          {
+            "partnerApiKey": [
+              "applications:create"
+            ]
+          }
+        ],
+        "tags": [
+          "finance-options"
+        ],
+        "summary": "The finance options you can offer for an amount.",
+        "description": "The options your customers can choose from now for this amount, in the order to show them: only those whose amounts cover it. The same options the customer's journey offers for an application of that amount. Send one's optionId on createApplication or issueHandoff to open the journey on it.",
+        "x-codeSamples": [
+          {
+            "lang": "curl",
+            "label": "curl",
+            "source": "curl -X GET 'https://api.example.invalid/partner/v1/finance-options?amount=119880' \\\n  -H \"Authorization: Bearer $PARTNER_API_KEY\""
+          },
+          {
+            "lang": "JavaScript",
+            "label": "Node (fetch)",
+            "source": "const res = await fetch(\"https://api.example.invalid/partner/v1/finance-options?amount=119880\", {\n  method: \"GET\",\n  headers: {\n    Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,\n  },\n});\nconst answer = await res.json(); // application/json, or application/problem+json on an error"
+          }
+        ],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1000000000,
+              "description": "The amount to finance in whole pence, digits only (the quote's total including VAT): 119880 = £1,198.80; from 1 to 1000000000.",
+              "example": 119880
+            },
+            "required": true,
+            "description": "The amount to finance in whole pence, digits only (the quote's total including VAT): 119880 = £1,198.80; from 1 to 1000000000.",
+            "name": "amount",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Your finance options for the amount; empty when none covers it.",
+            "content": {
+              "application/json": {
+                "examples": {
+                  "checkout": {
+                    "summary": "The options for £1,198.80",
+                    "value": {
+                      "items": [
+                        {
+                          "optionId": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90",
+                          "displayName": "12 monthly payments",
+                          "type": "interest_free",
+                          "termMonths": 12,
+                          "deferralMonths": 0,
+                          "monthlyPayment": null,
+                          "totalPayable": null,
+                          "minAmount": {
+                            "amount": 10000,
+                            "currency": "GBP"
+                          },
+                          "maxAmount": {
+                            "amount": 2500000,
+                            "currency": "GBP"
+                          }
+                        },
+                        {
+                          "optionId": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90",
+                          "displayName": "36 monthly payments",
+                          "type": "interest_bearing",
+                          "termMonths": 36,
+                          "deferralMonths": 0,
+                          "monthlyPayment": null,
+                          "totalPayable": null,
+                          "minAmount": {
+                            "amount": 25000,
+                            "currency": "GBP"
+                          },
+                          "maxAmount": {
+                            "amount": 2500000,
+                            "currency": "GBP"
+                          }
+                        },
+                        {
+                          "optionId": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90",
+                          "displayName": "Pay later: 6 months deferred, then 36 monthly payments",
+                          "type": "deferred",
+                          "termMonths": 36,
+                          "deferralMonths": 6,
+                          "monthlyPayment": null,
+                          "totalPayable": null,
+                          "minAmount": {
+                            "amount": 25000,
+                            "currency": "GBP"
+                          },
+                          "maxAmount": {
+                            "amount": 2500000,
+                            "currency": "GBP"
+                          }
+                        }
+                      ]
+                    }
+                  },
+                  "none": {
+                    "summary": "No option finances the amount",
+                    "value": {
+                      "items": []
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/FinanceOptions"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "The request does not match the contract.",
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "noAmount": {
+                    "summary": "No amount",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "The request does not match the contract",
+                      "status": 400,
+                      "code": "bad_request",
+                      "detail": "query.amount: Invalid input: expected number, received undefined"
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/Problem"
+                }
+              }
+            }
+          },
+          "401": {
+            "$ref": "#/components/responses/Unauthorized"
+          },
+          "403": {
+            "description": "insufficient_scope: the key is valid but lacks a scope this request needs, named in detail. Nothing was written.",
+            "content": {
+              "application/problem+json": {
+                "examples": {
+                  "missingScope": {
+                    "summary": "A key without applications:create",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "Forbidden",
+                      "status": 403,
+                      "code": "insufficient_scope",
+                      "detail": "listFinanceOptions needs a key with applications:create."
+                    }
+                  }
+                },
+                "schema": {
+                  "$ref": "#/components/schemas/ScopeProblem"
+                }
+              }
+            }
+          },
+          "429": {
+            "$ref": "#/components/responses/TooManyRequests"
+          }
+        }
+      }
     }
   },
   "webhooks": {
@@ -1717,11 +2087,11 @@
             "examples": {
               "statusChanged": {
                 "summary": "application.status_changed",
-                "value": "t=1791798067,v1=5cd52388091b18ca49ccffe17dd8d15475426045c29dcf9bd45ea48d1bebef53"
+                "value": "t=1791798067,v1=31411dc8e819bbb2fb9d1deeaa6f29d4631016972b2914bb15e729912ce9cba1"
               },
               "amended": {
                 "summary": "application.amended",
-                "value": "t=1791799364,v1=33281152afbfde5625cdc9ef277c0f1090d479b0888569892d6b483c8d950e60"
+                "value": "t=1791799364,v1=4a3e5a52b536f5f45f3cea822cb8630f4bba0588b5ea423af70f061c98aa4fac"
               },
               "test": {
                 "summary": "webhook.test (test only)",
@@ -1744,7 +2114,7 @@
                     "type": "application.status_changed",
                     "occurredAt": "2026-10-12T09:41:07.000Z",
                     "applicationId": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                    "partnerReference": "PB-104231",
+                    "partnerReference": "PF-104231",
                     "from": "created",
                     "to": "in_progress"
                   }
@@ -1756,7 +2126,7 @@
                     "type": "application.amended",
                     "occurredAt": "2026-10-12T10:02:44.000Z",
                     "applicationId": "5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10",
-                    "partnerReference": "PB-104231",
+                    "partnerReference": "PF-104231",
                     "quote": {
                       "total": {
                         "amountVatExclusive": {
@@ -2456,6 +2826,39 @@
         ],
         "title": "ScopeProblem"
       },
+      "CreateConflictProblem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "integer"
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "enum": [
+              "email_conflict",
+              "invalid_state",
+              "details_differ"
+            ]
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "title": "CreateConflictProblem"
+      },
       "QuoteProblem": {
         "type": "object",
         "properties": {
@@ -2548,6 +2951,12 @@
           },
           "quote": {
             "$ref": "#/components/schemas/QuoteRequest"
+          },
+          "optionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A finance option's optionId from listFinanceOptions. The customer's journey opens on it, and they can still choose another. Taken only while the application is created and the customer has not chosen an option themselves; the option already chosen is always accepted, so a replay is safe, and another is refused with 409 invalid_state. It must be one of your options for this application's amount now, or the request is refused with 422 product_unavailable naming optionId. Either way nothing is written.",
+            "example": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90"
           }
         },
         "required": [
@@ -2797,6 +3206,18 @@
         ],
         "title": "Handoff"
       },
+      "IssueHandoffRequest": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "A finance option's optionId from listFinanceOptions. The customer's journey opens on it, and they can still choose another. Taken only while the application is created and the customer has not chosen an option themselves; the option already chosen is always accepted, so a replay is safe, and another is refused with 409 invalid_state. It must be one of your options for this application's amount now, or the request is refused with 422 product_unavailable naming optionId. Either way nothing is written.",
+            "example": "3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90"
+          }
+        },
+        "title": "IssueHandoffRequest"
+      },
       "FulfilConflictProblem": {
         "type": "object",
         "properties": {
@@ -2828,6 +3249,113 @@
           "code"
         ],
         "title": "FulfilConflictProblem"
+      },
+      "FinanceOptions": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FinanceOption"
+            },
+            "description": "In the order to show them. Empty when none of your options finances the amount, or none is offered now."
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "FinanceOptions"
+      },
+      "FinanceOption": {
+        "type": "object",
+        "properties": {
+          "optionId": {
+            "type": "string",
+            "format": "uuid",
+            "description": "Ours and opaque. Send it as optionId on createApplication or issueHandoff to open the customer's journey on this option. A change to the option's terms gives it a new optionId, so read the options again rather than keeping one."
+          },
+          "displayName": {
+            "type": "string",
+            "description": "The option's name for the customer, from its shape alone: no rate, cost or lender. Show it as it is."
+          },
+          "type": {
+            "$ref": "#/components/schemas/FinanceOptionType"
+          },
+          "termMonths": {
+            "type": "integer",
+            "minimum": 1,
+            "description": "How many monthly payments."
+          },
+          "deferralMonths": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "Months with nothing to pay before the first payment; 0 for none."
+          },
+          "monthlyPayment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Always null for now: only the lender can work out the payments (see Showing finance options at checkout)."
+          },
+          "totalPayable": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Always null for now: only the lender can work out the total (see Showing finance options at checkout)."
+          },
+          "minAmount": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "The least this option finances."
+              }
+            ]
+          },
+          "maxAmount": {
+            "allOf": [
+              {
+                "$ref": "#/components/schemas/Money"
+              },
+              {
+                "description": "The most this option finances."
+              }
+            ]
+          }
+        },
+        "required": [
+          "optionId",
+          "displayName",
+          "type",
+          "termMonths",
+          "deferralMonths",
+          "monthlyPayment",
+          "totalPayable",
+          "minAmount",
+          "maxAmount"
+        ],
+        "title": "FinanceOption"
+      },
+      "FinanceOptionType": {
+        "type": "string",
+        "title": "FinanceOptionType",
+        "description": "interest_free: no interest. interest_bearing: monthly payments with interest. deferred: nothing to pay for deferralMonths, then termMonths monthly payments. Not for showing as a statement about cost: see Showing finance options at checkout.",
+        "enum": [
+          "interest_free",
+          "interest_bearing",
+          "deferred"
+        ]
       }
     },
     "parameters": {
@@ -2885,7 +3413,7 @@
         }
       },
       "Conflict": {
-        "description": "email_conflict when the partnerReference belongs to a different customer email; invalid_state when the application has ended, or when the quote changes and the application is not created or in progress.",
+        "description": "email_conflict when the partnerReference belongs to a different customer email; details_differ when the customer's title, name or mobile, or the property, differs from what the first create sent (nothing is changed and no handoffUrl is issued: the customer corrects their own details in the journey, and issueHandoff gives a fresh handoffUrl); invalid_state when the application has ended, when the quote changes and the application is not created or in progress, or when the optionId changes once the application is past created or the customer has chosen.",
         "content": {
           "application/problem+json": {
             "examples": {
@@ -2897,6 +3425,16 @@
                   "status": 409,
                   "code": "email_conflict",
                   "detail": "This partnerReference belongs to a different customer."
+                }
+              },
+              "detailsDiffer": {
+                "summary": "Other customer or property details than the first create's",
+                "value": {
+                  "type": "about:blank",
+                  "title": "Conflict",
+                  "status": 409,
+                  "code": "details_differ",
+                  "detail": "The customer's title, name and mobile and the property are those the first create sent, and only the customer corrects them, in the journey. Nothing was changed. For a fresh handoffUrl, call issueHandoff."
                 }
               },
               "ended": {
@@ -2918,16 +3456,26 @@
                   "code": "invalid_state",
                   "detail": "The quote can only change while the application is created or in progress."
                 }
+              },
+              "optionLocked": {
+                "summary": "Another optionId once the customer has chosen or started",
+                "value": {
+                  "type": "about:blank",
+                  "title": "Conflict",
+                  "status": 409,
+                  "code": "invalid_state",
+                  "detail": "The finance option can only change while the application is created and the customer has not chosen one."
+                }
               }
             },
             "schema": {
-              "$ref": "#/components/schemas/Problem"
+              "$ref": "#/components/schemas/CreateConflictProblem"
             }
           }
         }
       },
       "Unprocessable": {
-        "description": "The quote is refused: currency_mismatch (not GBP, or not one currency), invalid_line_item (detail names the item and the rule), total_out_of_range (our total including VAT is not above zero, or is over 1000000000, £10,000,000.00), total_mismatch (expectedTotal differs from ours; totals carries ours), product_unavailable (no finance product is offered for a new or changed quote now), or amount_out_of_bounds (the total including VAT is outside every offered product's loan amounts).",
+        "description": "The quote is refused: currency_mismatch (not GBP, or not one currency), invalid_line_item (detail names the item and the rule), total_out_of_range (our total including VAT is not above zero, or is over 1000000000, £10,000,000.00), total_mismatch (expectedTotal differs from ours; totals carries ours), product_unavailable (no finance product is offered for a new or changed quote now), or amount_out_of_bounds (the total including VAT is outside every offered product's loan amounts). On createApplication, product_unavailable naming optionId also refuses an optionId that is not one of your options for the quote's total now.",
         "content": {
           "application/problem+json": {
             "examples": {
@@ -3004,6 +3552,16 @@
                   "code": "product_unavailable",
                   "detail": "No finance product is available for this quote at the moment."
                 }
+              },
+              "optionUnavailable": {
+                "summary": "An optionId that is not one of your options for this amount now (createApplication, issueHandoff)",
+                "value": {
+                  "type": "about:blank",
+                  "title": "The finance option is unavailable",
+                  "status": 422,
+                  "code": "product_unavailable",
+                  "detail": "optionId: not one of your finance options for this amount now; read listFinanceOptions again"
+                }
               }
             },
             "schema": {
@@ -3055,6 +3613,7 @@
         "getting-started",
         "money",
         "webhook-signatures",
+        "finance-options-guide",
         "idempotency",
         "return-addresses",
         "errors"
@@ -3064,6 +3623,7 @@
       "name": "API",
       "tags": [
         "applications",
+        "finance-options",
         "webhooks"
       ]
     }
