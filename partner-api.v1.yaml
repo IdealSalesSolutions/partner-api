@@ -241,9 +241,13 @@ tags:
       `409 invalid_state`.
 
 
-      **fulfilApplication** takes an `Idempotency-Key`; its rules are on the operation. It answers
+      **fulfilApplication** tells us the customer has received what they financed. It takes an
 
-      `501` until it is available.
+      `Idempotency-Key`, its rules are on the operation, and answers `202`: the application stays
+
+      signed until the lender acknowledges, then your webhook receives signed to fulfilled. Nothing
+
+      fulfils an application otherwise, and a request cannot be withdrawn.
 
 
       **Webhooks** are retried with growing gaps for 24 hours, then marked failed. Read the
@@ -1890,11 +1894,11 @@ paths:
         application automatically. The request is accepted with 202 and the application stays signed
         until the lender acknowledges it; it then moves to fulfilled, and your webhook receives
         application.status_changed from signed to fulfilled. Only an accepted request (202) binds
-        its Idempotency-Key: a retry with the same key then always answers that original 202,
-        whatever the application's state is now. A refused request (404 or 409) stores nothing, so
-        the same key can be used again once the application is ready, and that call gets a fresh
+        its Idempotency-Key: a retry with the same key then always answers 202 again, with the
+        application as it is now, whatever its state. A refused request (404 or 409) stores nothing,
+        so the same key can be used again once the application is ready, and that call gets a fresh
         answer. While a request is pending, another call with a new key answers 202 with the same
-        state and starts nothing new. Not yet available: this operation currently answers 501."
+        state and starts nothing new. A request cannot be withdrawn."
       tags:
         - applications
       x-codeSamples:
@@ -1922,28 +1926,89 @@ paths:
             minLength: 1
             maxLength: 255
             description: "A key you choose for this fulfilment request. Only an accepted request (202) binds the
-              key: a retry with the same key then answers that original 202 again, whatever the
-              application's state is now, and starts nothing new. A refused request (404 or 409)
-              stores nothing, so the same key can be used again once the application is ready and
-              gets a fresh answer. A key bound by a 202 for a different application of yours is
-              refused with 409 idempotency_key_conflict."
+              key: a retry with the same key then answers 202 again, with the application as it is
+              now, and starts nothing new. A refused request (404 or 409) stores nothing, so the
+              same key can be used again once the application is ready and gets a fresh answer. A
+              key bound by a 202 for a different application of yours is refused with 409
+              idempotency_key_conflict."
           required: true
           description: "A key you choose for this fulfilment request. Only an accepted request (202) binds the
-            key: a retry with the same key then answers that original 202 again, whatever the
-            application's state is now, and starts nothing new. A refused request (404 or 409)
-            stores nothing, so the same key can be used again once the application is ready and gets
-            a fresh answer. A key bound by a 202 for a different application of yours is refused
-            with 409 idempotency_key_conflict."
+            key: a retry with the same key then answers 202 again, with the application as it is
+            now, and starts nothing new. A refused request (404 or 409) stores nothing, so the same
+            key can be used again once the application is ready and gets a fresh answer. A key bound
+            by a 202 for a different application of yours is refused with 409
+            idempotency_key_conflict."
           name: Idempotency-Key
           in: header
       responses:
         "202":
           description: "Fulfilment requested. The application is still signed; it becomes fulfilled when the
             lender acknowledges, signalled by your webhook. This response binds the Idempotency-Key:
-            a retry with the same key gets this original response again, even once the application
-            has moved on."
+            a retry with the same key gets 202 again, with the application as it is then, even once
+            it has moved on."
           content:
             application/json:
+              examples:
+                requested:
+                  summary: "Requested: the application stays signed until the lender acknowledges"
+                  value:
+                    id: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                    partnerReference: PF-104231
+                    status: signed
+                    customer:
+                      title: ms
+                      firstName: Jane
+                      lastName: Seller
+                      email: jane.seller@example.com
+                      mobile: "+447700900123"
+                    property:
+                      flat: Flat 2
+                      buildingName: Mill House
+                      buildingNumber: "22"
+                      line1: Mill Lane
+                      town: York
+                      postcode: YO1 7HH
+                      country: GB
+                      line2: null
+                      line3: null
+                      county: null
+                      uprn: null
+                    quote:
+                      items:
+                        - description: |-
+                            Includes:
+                            - Listing on the major property portals
+                            - For-sale board
+                          quantity: 100
+                          discount: null
+                          title: Standard listing
+                          unitPrice:
+                            amount: 99900
+                            currency: GBP
+                          vatRate: 20%
+                          vat:
+                            amount: 19980
+                            currency: GBP
+                          net:
+                            amount: 99900
+                            currency: GBP
+                      total:
+                        amountVatExclusive:
+                          amount: 99900
+                          currency: GBP
+                        amountVat:
+                          amount: 19980
+                          currency: GBP
+                        amountVatInclusive:
+                          amount: 119880
+                          currency: GBP
+                      createdAt: 2026-10-12T09:30:00.000Z
+                    timestamps:
+                      createdAt: 2026-10-12T09:30:00.000Z
+                      updatedAt: 2026-10-12T09:30:00.000Z
+                      statusChangedAt: 2026-10-12T09:30:00.000Z
+                      fulfilledAt: null
+                      paidOutAt: null
               schema:
                 $ref: "#/components/schemas/Application"
         "400":
@@ -1996,24 +2061,27 @@ paths:
             later call with it gets a fresh answer."
           content:
             application/problem+json:
+              examples:
+                notSigned:
+                  summary: The application is not signed
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: invalid_state
+                    detail: Only a signed application can be fulfilled. Nothing was changed.
+                keyConflict:
+                  summary: The Idempotency-Key was accepted for another application
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: idempotency_key_conflict
+                    detail: This Idempotency-Key was accepted for another of your applications. Nothing was changed.
               schema:
                 $ref: "#/components/schemas/FulfilConflictProblem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
-        "501":
-          description: Not yet available.
-          content:
-            application/problem+json:
-              examples:
-                notImplemented:
-                  summary: Not yet available
-                  value:
-                    type: about:blank
-                    title: fulfilApplication is not implemented
-                    status: 501
-                    code: not_implemented
-              schema:
-                $ref: "#/components/schemas/NotImplementedProblem"
   /v1/finance-options:
     get:
       operationId: listFinanceOptions
