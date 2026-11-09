@@ -253,7 +253,13 @@ tags:
       **Webhooks** are retried with growing gaps for 24 hours, then marked failed. Read the
       application
 
-      with `getApplication` to catch up; Ideal can replay any event.
+      with `getApplication` to catch up. A partner admin can resend any delivered or failed event
+      from
+
+      the partner admin's Webhooks page, and Ideal can too; a resent event arrives after any later
+      ones
+
+      already delivered.
     x-traitTag: true
   - name: return-addresses
     x-displayName: Return addresses
@@ -380,6 +386,84 @@ tags:
 
       replaced with one of ours.
     x-traitTag: true
+  - name: testing
+    x-displayName: Testing on QA
+    description: >-
+      **On QA only.** On QA, Ideal's test lender, which lends nothing, decides each application sent
+      to
+
+      it by a tag in the customer's email, so you can reach each outcome on purpose. Ask Ideal which
+      of
+
+      QA's finance options go to it. In production a tag is part of the address and decides nothing.
+
+
+      **Choose the outcome with the email.** Add the tag after a `+` in the customer's email on
+
+      `createApplication`, as in `jo+decline@example.com`.
+
+
+      | Tag | What your webhook receives after submitted |
+
+      |---|---|
+
+      | none, or `+approve` | approved; the customer goes on to the lender's checkout |
+
+      | `+different` | approved at different figures, which the customer accepts before the checkout
+      |
+
+      | `+decline` | declined |
+
+      | `+refer` | referred, and nothing follows: the referral never resolves |
+
+      | `+referapprove` | referred, then approved |
+
+      | `+referdecline` | referred, then declined |
+
+      | `+referexpire` | referred, then expired |
+
+      | `+expire` | approved, then in_progress if the customer has not signed: the approval lapsed,
+      and the customer can submit again |
+
+      | `+invalid` | in_progress: the lender refused the customer's answers, for them to correct;
+      submitted again, it stays submitted |
+
+      | `+timeout`, `+error` | nothing: the lender never answers, and the application stays
+      submitted |
+
+
+      The later outcome of `+referapprove`, `+referdecline`, `+referexpire` and `+expire` is applied
+
+      at our first check of the lender two minutes or more after the customer submits, usually
+      within
+
+      five minutes.
+
+
+      **The lender's checkout** offers **Sign and finish**, which moves the application to signed,
+      ready
+
+      for `fulfilApplication`, and **Cancel**, which returns it to in_progress as a customer leaving
+      the
+
+      lender's site does.
+
+
+      **Webhooks.** A partner admin can resend events from the partner admin's Webhooks page: one
+      event,
+
+      the selected ones, or every delivered or failed event the filter matches (at most 500 at
+      once).
+
+      Each carries its original `eventId` and `occurredAt`, and arrives after any later events
+      already
+
+      delivered, which is how to test your handling of events out of order. **Send test** sends one
+
+      signed `webhook.test`. To test a rejected delivery, answer non-2XX from your own endpoint: we
+
+      retry for 24 hours, then mark it failed.
+    x-traitTag: true
   - name: applications
     description: Applications.
   - name: finance-options
@@ -397,6 +481,7 @@ x-tagGroups:
       - idempotency
       - return-addresses
       - errors
+      - testing
   - name: API
     tags:
       - applications
@@ -2233,10 +2318,13 @@ webhooks:
         carries two v1 entries, one per secret, so you can switch secrets without missing a
         delivery. A delivery that does not answer 2XX within 10 seconds is retried with growing gaps
         for 24 hours, then marked failed and Ideal's operations team is alerted; read the
-        application with getApplication to catch up, and Ideal can replay any event. Redirects are
-        not followed. Events for one application arrive in the order they happened, each after the
-        one before it has been delivered or has failed; events for different applications arrive
-        independently. Every retry and replay carries the same eventId."
+        application with getApplication to catch up. A partner_admin can resend any delivered or
+        failed event from the partner admin, and Ideal can too. Redirects are not followed. Events
+        for one application are sent in the order they happened, each after the one before it has
+        been delivered or has failed; a resent event arrives after any later ones already delivered,
+        so order by occurredAt or read getApplication rather than trusting arrival order. Events for
+        different applications arrive independently. Every retry and replay carries the same
+        eventId."
       security: []
       tags:
         - webhooks
@@ -2370,9 +2458,9 @@ components:
       type: string
       title: ApplicationStatus
       description: "referred: the lender is looking more closely before it decides; approved, declined or
-        expired follows. A customer who leaves the lender's site before finishing returns the
-        application from submitted, referred or approved to in_progress, to submit again; only the
-        customer, the partner or Ideal cancels it."
+        expired follows (on QA, only under the tags in Testing on QA). A customer who leaves the
+        lender's site before finishing returns the application from submitted, referred or approved
+        to in_progress, to submit again; only the customer, the partner or Ideal cancels it."
       enum:
         - created
         - in_progress
