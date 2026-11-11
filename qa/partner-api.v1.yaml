@@ -16,13 +16,16 @@ tags:
     x-displayName: Getting started
     description: >-
       1. **Get an API key.** A partner admin creates keys in the partner admin, choosing each key's
-         scopes (`applications:create`, `applications:read`, `applications:amend`) and, optionally,
+         scopes (`applications:create`, `applications:read`, `applications:amend`,
+         `applications:refund`) and, optionally,
          the IP ranges it may be used from. The key is shown once. Send it on every request as
          `Authorization: Bearer <key>`. The server in this page is a placeholder: use the base URL you
          are given, which ends in `/partner`. Every path here, such as `/v1/applications`, follows it.
       2. **Create the application** with `POST /v1/applications`: your `partnerReference`, the
       customer,
-         the property and the quote. A `201` returns the Application and a `handoffUrl`.
+         the property and the quote. A `201` returns the Application and a `handoffUrl`. Send
+         `backUrl` too, such as the basket the customer came from, and the start of the journey offers a
+         way back to it: see *Return addresses*.
       3. **Send the customer to `handoffUrl`.** It works once and expires 30 minutes after it is
       issued.
          For another, call `issueHandoff`: each URL issued stops the earlier unused ones working, and a
@@ -227,8 +230,9 @@ tags:
       - with a changed quote, it is an amend: the key needs `applications:amend` as well (otherwise
         `403 insufficient_scope`, nothing changed), and the application must be created or in progress
         (otherwise `409 invalid_state`).
-      - once the application has ended (declined, withdrawn, cancelled, expired or paid out), it is
-        refused with `409 invalid_state`.
+      - once the application has ended (declined, withdrawn, cancelled, expired, paid out, refunded
+      or
+        repaid), it is refused with `409 invalid_state`.
 
       **amendApplication replaces the whole quote.** It answers `201` while the application is
       created
@@ -248,6 +252,13 @@ tags:
       signed until the lender acknowledges, then your webhook receives signed to fulfilled. Nothing
 
       fulfils an application otherwise, and a request cannot be withdrawn.
+
+
+      **requestRefund** takes an `Idempotency-Key`; its rules are on the operation. Your webhook
+
+      receives `application.refund_updated` as each refund is accepted, completes or fails, and
+
+      `listRefunds` reads them with the refundable balance.
 
 
       **Webhooks** are retried with growing gaps for 24 hours, then marked failed. Read the
@@ -310,6 +321,36 @@ tags:
       **Arriving is not proof.** Anyone can open either address, with any reference. Confirm the
 
       outcome from the webhook, or with `getApplication`, before acting on it.
+
+
+      **The back link.** At the start of the journey, on the email code and plan pages, we offer the
+
+      customer a way back to your site. Send `backUrl` on `createApplication` or `issueHandoff` with
+
+      where they came from, such as their basket; each one that sends it replaces the last. It
+      follows the
+
+      rules above, `{{ref}}` included, and its domain must be one Ideal has approved for you: a
+      partner
+
+      admin submits each domain in the partner admin, and it is used only once approved.
+
+
+      - Any https page on an approved domain can be a back link, with any path or query.
+
+      - A domain covers itself alone: `example.com` does not cover `www.example.com` or
+        `staging.example.com`, so submit each one. There are no wildcards.
+      - Any other `backUrl` is refused with `400 bad_request`, its `detail` starting `backUrl:`, and
+        nothing is written.
+
+      ```json
+
+      { "backUrl": "https://www.example.com/basket?order={{ref}}" }
+
+      ```
+
+
+      Without a `backUrl`, the way back goes to your failure address; with neither, none is offered.
     x-traitTag: true
   - name: errors
     x-displayName: Errors
@@ -348,14 +389,16 @@ tags:
 
       | 404 | `not_found` | No application of yours has that id or `partnerReference`. |
 
-      | 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict` | See
-      *Idempotency and retries*, *Showing finance options at checkout* and each operation. |
+      | 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict`,
+      `refund_unavailable`, `refund_pending` | See *Idempotency and retries*, *Showing finance
+      options at checkout* and each operation. |
 
       | 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`,
-      `product_unavailable`, `amount_out_of_bounds` | The quote is refused: see *Money and
-      quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule.
-      `product_unavailable` naming `optionId` refuses the option sent: see *Showing finance options
-      at checkout*. |
+      `product_unavailable`, `amount_out_of_bounds`, `amount_exceeds_balance` | The quote is
+      refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item
+      (`quote.items[0]`) and the rule. `product_unavailable` naming `optionId` refuses the option
+      sent: see *Showing finance options at checkout*. On requestRefund, `amount_exceeds_balance`
+      (with `refundableBalance`) or `currency_mismatch` refuses the amount. |
 
       | 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |
 
@@ -438,6 +481,32 @@ tags:
       within
 
       five minutes.
+
+
+      **Refunds.** Once signed, the test lender accepts a refund at once and completes it for the
+      amount
+
+      asked about two minutes later. Three more tags, in the same place, reach the rest. On the last
+      two,
+
+      request a partial refund first, which is refused, then within the hour the Quote's full total.
+
+
+      | Tag | What a refund request reaches |
+
+      |---|---|
+
+      | `+refundrefuse` | every refund is refused at once: failed |
+
+      | `+refundlate` | the first refund is refused, then completed an hour later all the same; the
+      full total, accepted meanwhile, then stays pending and holds the open slot:
+      `refundableBalance` is 0 and another request is `409 refund_pending` until Ideal marks it
+      failed |
+
+      | `+refundstall` | the first refund is refused, then completed an hour later; the full total,
+      never answered meanwhile, fails when that completion leaves too little for it, is accepted an
+      hour after that, still reading failed but holding the open slot (another request is `409
+      refund_pending`), and is completed an hour later, moving the application to refunded |
 
 
       **The lender's checkout** offers **Sign and finish**, which moves the application to signed,
@@ -825,8 +894,8 @@ paths:
             property must be those the first create sent: other details are refused with 409
             details_differ and change nothing. Each call returns a fresh handoffUrl, and every
             earlier unused one stops working. Once the application has ended (declined, withdrawn,
-            cancelled, expired or paid out) the call is refused with 409 invalid_state and no
-            handoffUrl is issued."
+            cancelled, expired, paid out, refunded or repaid) the call is refused with 409
+            invalid_state and no handoffUrl is issued."
           content:
             application/json:
               examples:
@@ -1196,6 +1265,15 @@ paths:
                     code: bad_request
                     detail: 'json.customer.email: Invalid email address; json.quote.items.0.vatRate: Invalid option:
                       expected one of "exempt"|"0%"|"5%"|"20%"'
+                backUrlNotAllowed:
+                  summary: A backUrl on a domain Ideal has not approved for you
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "backUrl: not an https address on a domain Ideal has approved for you, with {{ref}} at most
+                      once. Nothing was written."
               schema:
                 $ref: "#/components/schemas/Problem"
         "401":
@@ -1818,8 +1896,8 @@ paths:
       description: "Each call issues a new single-use URL, and every earlier unused one for the
         application, from createApplication or this operation, stops working; a customer already in
         the journey stays in it. Use it for a fresh URL rather than sending createApplication again.
-        Refused once the application has ended: declined, withdrawn, cancelled, expired or paid
-        out."
+        Refused once the application has ended: declined, withdrawn, cancelled, expired, paid out,
+        refunded or repaid."
       tags:
         - applications
       x-codeSamples:
@@ -1851,7 +1929,8 @@ paths:
       requestBody:
         required: false
         description: Optional, and sent as application/json when there is one. optionId opens the customer's
-          journey on that finance option; without a body nothing but the URL changes.
+          journey on that finance option, and backUrl sets where its back link goes; without a body
+          nothing but the URL changes.
         content:
           application/json:
             examples:
@@ -1859,6 +1938,10 @@ paths:
                 summary: Open the journey on the option the customer chose
                 value:
                   optionId: 3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90
+              withBackUrl:
+                summary: Let the customer go back to the basket they came from
+                value:
+                  backUrl: https://www.example.com/basket?order={{ref}}
             schema:
               $ref: "#/components/schemas/IssueHandoffRequest"
       responses:
@@ -1900,6 +1983,15 @@ paths:
                     status: 400
                     code: bad_request
                     detail: Unsupported Media Type
+                backUrlNotAllowed:
+                  summary: A backUrl on a domain Ideal has not approved for you
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "backUrl: not an https address on a domain Ideal has approved for you, with {{ref}} at most
+                      once. Nothing was written."
               schema:
                 $ref: "#/components/schemas/Problem"
         "401":
@@ -2167,6 +2259,335 @@ paths:
                 $ref: "#/components/schemas/FulfilConflictProblem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+  /v1/applications/{applicationId}/refunds:
+    post:
+      operationId: requestRefund
+      security:
+        - partnerApiKey:
+            - applications:refund
+      summary: Request a refund.
+      description: "Asks Ideal to refund some or all of what the customer financed, after they signed:
+        while the application is signed, fulfilled or paid_out. Accepted with 202 and the Refund
+        pending; your webhook receives application.refund_updated when it completes or fails, and a
+        refund that brings the amount refunded to the Quote's total including VAT moves the
+        application to refunded. One refund request may be open at a time. Only an accepted request
+        (202) binds its Idempotency-Key: a retry with the same key, amount and reason answers 202
+        again with the Refund as it is now, before any other check. A refused request (404, 409 or
+        422) stores nothing. The checks run in this order: the application, the Idempotency-Key, the
+        status, whether refunds can be requested for it, an open request, then the amount and its
+        currency. A refund request cannot be withdrawn or changed."
+      tags:
+        - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: |-
+            curl -X POST 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/refunds' \
+              -H "Authorization: Bearer $PARTNER_API_KEY" \
+              -H 'Idempotency-Key: refund-104231-1' \
+              -H 'Content-Type: application/json' \
+              --data '{
+              "amount": {
+                "amount": 119880,
+                "currency": "GBP"
+              },
+              "reason": "customer_withdrew"
+            }'
+        - lang: JavaScript
+          label: Node (fetch)
+          source: |-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/refunds", {
+              method: "POST",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+                "Idempotency-Key": "refund-104231-1",
+                "Content-Type": "application/json",
+              },
+              body: JSON.stringify({
+                "amount": {
+                  "amount": 119880,
+                  "currency": "GBP"
+                },
+                "reason": "customer_withdrew"
+              }),
+            });
+            const answer = await res.json(); // application/json, or application/problem+json on an error
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+        - schema:
+            type: string
+            minLength: 1
+            maxLength: 255
+            description: "A key you choose for this refund request, unique among your refund requests; a key you
+              used for fulfilApplication may be used here. Only an accepted request (202) binds the
+              key: a retry with the same key, application, amount and reason answers 202 again, with
+              the Refund as it is now, and starts nothing new. A key bound by a 202 for another
+              application, amount or reason is refused with 409 idempotency_key_conflict."
+          required: true
+          description: "A key you choose for this refund request, unique among your refund requests; a key you
+            used for fulfilApplication may be used here. Only an accepted request (202) binds the
+            key: a retry with the same key, application, amount and reason answers 202 again, with
+            the Refund as it is now, and starts nothing new. A key bound by a 202 for another
+            application, amount or reason is refused with 409 idempotency_key_conflict."
+          name: Idempotency-Key
+          in: header
+      requestBody:
+        required: true
+        content:
+          application/json:
+            examples:
+              customerWithdrew:
+                summary: "A full refund: the customer withdrew"
+                value:
+                  amount:
+                    amount: 119880
+                    currency: GBP
+                  reason: customer_withdrew
+            schema:
+              $ref: "#/components/schemas/RefundRequest"
+      responses:
+        "202":
+          description: "Refund requested: the Refund, pending. This response binds the Idempotency-Key: a
+            retry with the same key gets 202 again, with the Refund as it is then, even once it has
+            completed or failed."
+          content:
+            application/json:
+              examples:
+                requested:
+                  summary: "Requested: pending until the refund completes or fails"
+                  value:
+                    refundId: 7a4d2f90-3e1b-4c6a-8f57-1b9e0d3c6a24
+                    amount:
+                      amount: 119880
+                      currency: GBP
+                    amountRefunded: null
+                    reason: customer_withdrew
+                    state: pending
+                    requestedAt: 2026-11-16T09:02:31.000Z
+                    completedAt: null
+                    failedAt: null
+              schema:
+                $ref: "#/components/schemas/Refund"
+        "400":
+          description: "The request does not match the contract: the application id, the Idempotency-Key or
+            the body (an amount below 1p is a 400)."
+          content:
+            application/problem+json:
+              examples:
+                noIdempotencyKey:
+                  summary: No Idempotency-Key
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "header.Idempotency-Key: Invalid input: expected string, received undefined"
+                zeroAmount:
+                  summary: An amount below 1p
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "json.amount.amount: Too small: expected number to be >=1"
+                badId:
+                  summary: An application id that is not a UUID
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "param.applicationId: Invalid UUID"
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:refund
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: requestRefund needs a key with applications:refund.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: "When no earlier 202 bound the Idempotency-Key: invalid_state when the application is
+            not signed, fulfilled or paid_out; refund_unavailable when refunds for this application
+            cannot yet be requested through the API (contact Ideal); refund_pending when another
+            refund request is open, which may be one shown failed that still holds the open slot
+            (see Refund.failedAt). idempotency_key_conflict when the key is bound by a 202 for
+            another application, amount or reason. A 409 stores nothing."
+          content:
+            application/problem+json:
+              examples:
+                notSigned:
+                  summary: The application is not signed, fulfilled or paid_out
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: invalid_state
+                    detail: A refund can be requested only while the application is signed, fulfilled or paid_out.
+                      Nothing was changed.
+                unavailable:
+                  summary: Refunds for this application cannot yet be requested through the API
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: refund_unavailable
+                    detail: "Refunds for this application cannot yet be requested through the API: contact Ideal.
+                      Nothing was changed."
+                pending:
+                  summary: Another refund request is open
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: refund_pending
+                    detail: Another refund request for this application is open. Nothing was changed.
+                keyConflict:
+                  summary: The Idempotency-Key was accepted for another refund request
+                  value:
+                    type: about:blank
+                    title: Conflict
+                    status: 409
+                    code: idempotency_key_conflict
+                    detail: This Idempotency-Key was accepted for another refund request. Nothing was changed.
+              schema:
+                $ref: "#/components/schemas/RefundConflictProblem"
+        "422":
+          description: "When no earlier 202 bound the Idempotency-Key: amount_exceeds_balance when the amount
+            is more than can be refunded now (refundableBalance carries it), or currency_mismatch
+            when it is not in GBP. A 422 stores nothing."
+          content:
+            application/problem+json:
+              examples:
+                exceedsBalance:
+                  summary: "amount_exceeds_balance: more than can be refunded now"
+                  value:
+                    type: about:blank
+                    title: The amount is refused
+                    status: 422
+                    code: amount_exceeds_balance
+                    detail: The amount is more than can be refunded now. Nothing was changed.
+                    refundableBalance:
+                      amount: 119880
+                      currency: GBP
+                currencyMismatch:
+                  summary: "currency_mismatch: not in GBP"
+                  value:
+                    type: about:blank
+                    title: The amount is refused
+                    status: 422
+                    code: currency_mismatch
+                    detail: A refund is in the currency of the application's quote, GBP. Nothing was changed.
+              schema:
+                $ref: "#/components/schemas/RefundAmountProblem"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
+    get:
+      operationId: listRefunds
+      security:
+        - partnerApiKey:
+            - applications:read
+      summary: The refunds requested for an Application, and what can still be refunded.
+      description: "Newest first. refundableBalance is what requestRefund can ask for now: null unless the
+        application is signed, fulfilled or paid_out."
+      tags:
+        - applications
+      x-codeSamples:
+        - lang: curl
+          label: curl
+          source: |-
+            curl -X GET 'https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/refunds' \
+              -H "Authorization: Bearer $PARTNER_API_KEY"
+        - lang: JavaScript
+          label: Node (fetch)
+          source: |-
+            const res = await fetch("https://api.example.invalid/partner/v1/applications/5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10/refunds", {
+              method: "GET",
+              headers: {
+                Authorization: `Bearer ${process.env.PARTNER_API_KEY}`,
+              },
+            });
+            const answer = await res.json(); // application/json, or application/problem+json on an error
+      parameters:
+        - $ref: "#/components/parameters/ApplicationId"
+      responses:
+        "200":
+          description: The application's refunds and its refundable balance.
+          content:
+            application/json:
+              examples:
+                refunded:
+                  summary: A partial refund completed, and what is left
+                  value:
+                    refundableBalance:
+                      amount: 69880
+                      currency: GBP
+                    refunds:
+                      - refundId: 7a4d2f90-3e1b-4c6a-8f57-1b9e0d3c6a24
+                        amount:
+                          amount: 50000
+                          currency: GBP
+                        amountRefunded:
+                          amount: 50000
+                          currency: GBP
+                        reason: partial_service
+                        state: completed
+                        requestedAt: 2026-11-16T09:02:31.000Z
+                        completedAt: 2026-11-16T11:20:05.000Z
+                        failedAt: null
+              schema:
+                $ref: "#/components/schemas/Refunds"
+        "400":
+          description: The request does not match the contract.
+          content:
+            application/problem+json:
+              examples:
+                badId:
+                  summary: An application id that is not a UUID
+                  value:
+                    type: about:blank
+                    title: The request does not match the contract
+                    status: 400
+                    code: bad_request
+                    detail: "param.applicationId: Invalid UUID"
+              schema:
+                $ref: "#/components/schemas/Problem"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: "insufficient_scope: the key is valid but lacks a scope this request needs, named in
+            detail. Nothing was written."
+          content:
+            application/problem+json:
+              examples:
+                missingScope:
+                  summary: A key without applications:read
+                  value:
+                    type: about:blank
+                    title: Forbidden
+                    status: 403
+                    code: insufficient_scope
+                    detail: listRefunds needs a key with applications:read.
+              schema:
+                $ref: "#/components/schemas/ScopeProblem"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "429":
+          $ref: "#/components/responses/TooManyRequests"
   /v1/finance-options:
     get:
       operationId: listFinanceOptions
@@ -2324,7 +2745,7 @@ webhooks:
         been delivered or has failed; a resent event arrives after any later ones already delivered,
         so order by occurredAt or read getApplication rather than trusting arrival order. Events for
         different applications arrive independently. Every retry and replay carries the same
-        eventId."
+        eventId. New event types may be added: answer one you do not recognise 2XX and ignore it."
       security: []
       tags:
         - webhooks
@@ -2346,6 +2767,9 @@ webhooks:
             amended:
               summary: application.amended
               value: t=1791799364,v1=4a3e5a52b536f5f45f3cea822cb8630f4bba0588b5ea423af70f061c98aa4fac
+            refundUpdated:
+              summary: application.refund_updated
+              value: t=1794828005,v1=920474d26a7d73dc009542189e5af0c73a911ea53681b55e7db6f959aca05258
             test:
               summary: webhook.test (test only)
               value: t=1792404900,v1=45cff1c062905d67551d70b1c19d6ccf9283c630a564f460b6dbc7a1efaf2e31
@@ -2385,6 +2809,27 @@ webhooks:
                       amountVatInclusive:
                         amount: 137880
                         currency: GBP
+              refundUpdated:
+                summary: application.refund_updated
+                value:
+                  eventId: 2c7e9a14-5b3d-4f81-a6e2-9d0b4c8f1a37
+                  type: application.refund_updated
+                  occurredAt: 2026-11-16T11:20:05.000Z
+                  applicationId: 5f0c7d2e-8a41-4c3b-9e6f-2d1a7b9c4e10
+                  partnerReference: PF-104231
+                  refund:
+                    refundId: 7a4d2f90-3e1b-4c6a-8f57-1b9e0d3c6a24
+                    amount:
+                      amount: 119880
+                      currency: GBP
+                    amountRefunded:
+                      amount: 119880
+                      currency: GBP
+                    reason: customer_withdrew
+                    state: completed
+                    requestedAt: 2026-11-16T09:02:31.000Z
+                    completedAt: 2026-11-16T11:20:05.000Z
+                    failedAt: null
               test:
                 summary: webhook.test (test only)
                 value:
@@ -2404,18 +2849,20 @@ components:
       type: http
       scheme: bearer
       description: "A partner API key as a bearer token. Each operation names the scope it needs:
-        applications:create, applications:read or applications:amend."
+        applications:create, applications:read, applications:amend or applications:refund."
   schemas:
     WebhookEvent:
       oneOf:
         - $ref: "#/components/schemas/StatusChangedEvent"
         - $ref: "#/components/schemas/AmendedEvent"
+        - $ref: "#/components/schemas/RefundUpdatedEvent"
         - $ref: "#/components/schemas/TestEvent"
       discriminator:
         propertyName: type
         mapping:
           application.status_changed: "#/components/schemas/StatusChangedEvent"
           application.amended: "#/components/schemas/AmendedEvent"
+          application.refund_updated: "#/components/schemas/RefundUpdatedEvent"
           webhook.test: "#/components/schemas/TestEvent"
       title: WebhookEvent
     StatusChangedEvent:
@@ -2460,7 +2907,10 @@ components:
       description: "referred: the lender is looking more closely before it decides; approved, declined or
         expired follows (on QA, only under the tags in Testing on QA). A customer who leaves the
         lender's site before finishing returns the application from submitted, referred or approved
-        to in_progress, to submit again; only the customer, the partner or Ideal cancels it."
+        to in_progress, to submit again; only the customer, the partner or Ideal cancels it.
+        refunded: completed refunds have reached the Quote's total including VAT and the agreement
+        is closed; nothing follows it. repaid: the customer has repaid the agreement in full; not
+        yet sent. Handle every value: this set is closed."
       enum:
         - created
         - in_progress
@@ -2474,6 +2924,8 @@ components:
         - withdrawn
         - cancelled
         - expired
+        - refunded
+        - repaid
     AmendedEvent:
       type: object
       properties:
@@ -2542,6 +2994,95 @@ components:
         - amount
         - currency
       title: Money
+    RefundUpdatedEvent:
+      type: object
+      properties:
+        eventId:
+          type: string
+          format: uuid
+          description: "This event's own id. It is the same on every retry and replay of the event: use it to
+            de-duplicate."
+        type:
+          type: string
+          const: application.refund_updated
+        occurredAt:
+          type: string
+          format: date-time
+        applicationId:
+          type: string
+          format: uuid
+          description: Ideal's Application id, the id createApplication returned. Never a lender's reference.
+        partnerReference:
+          type: string
+        refund:
+          $ref: "#/components/schemas/Refund"
+      required:
+        - eventId
+        - type
+        - occurredAt
+        - applicationId
+        - partnerReference
+        - refund
+      title: RefundUpdatedEvent
+      description: refund is the Refund as it stood at this event. Sent when a refund request is accepted,
+        completes or fails, and when a failed refund starts or stops holding the open slot (see
+        Refund.failedAt). A refund that brings the amount refunded to the Quote's total is followed
+        by application.status_changed to refunded.
+    Refund:
+      type: object
+      properties:
+        refundId:
+          type: string
+          format: uuid
+          description: Ideal's id for this refund. Never a lender's.
+        amount:
+          $ref: "#/components/schemas/Money"
+        amountRefunded:
+          anyOf:
+            - $ref: "#/components/schemas/Money"
+            - type: "null"
+          description: What was refunded, which can differ from amount, the amount requested; null until the
+            refund is completed.
+        reason:
+          type: string
+          description: A RefundReason; more reasons may be added.
+        state:
+          $ref: "#/components/schemas/RefundState"
+        requestedAt:
+          type: string
+          format: date-time
+        completedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+        failedAt:
+          type:
+            - string
+            - "null"
+          format: date-time
+          description: "When it failed; kept when a failed refund later completes. A failed refund the lender
+            accepts afterwards still reads failed, but holds the open slot until it ends:
+            refundableBalance counts it and another request is refused with 409 refund_pending."
+      required:
+        - refundId
+        - amount
+        - amountRefunded
+        - reason
+        - state
+        - requestedAt
+        - completedAt
+        - failedAt
+      title: Refund
+    RefundState:
+      type: string
+      title: RefundState
+      description: pending until the refund completes or fails. A failed refund that later completes
+        becomes completed; a state never otherwise goes back.
+      enum:
+        - pending
+        - completed
+        - failed
     TestEvent:
       type: object
       properties:
@@ -2985,6 +3526,20 @@ components:
             one of your options for this application's amount now, or the request is refused with
             422 product_unavailable naming optionId. Either way nothing is written.
           example: 3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90
+        backUrl:
+          type: string
+          maxLength: 2048
+          description: "Where the customer goes if they choose to go back to your site from the start of the
+            journey (the email code and plan pages), such as the basket they came from. An https
+            address on port 443, with `{{ref}}` at most once in the path or query, which we replace
+            with your partnerReference, URL-encoded. Its domain must be one Ideal has approved for
+            you: a partner admin submits each domain in the partner admin, and it is used only once
+            approved. A domain covers itself alone, not its subdomains. Any other address is refused
+            with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without
+            one, the link goes to your failure address, and with neither there is no link. Each
+            createApplication or issueHandoff that sends it replaces the last; one that omits it
+            leaves it as it was."
+          example: https://www.example.com/basket?order={{ref}}
       required:
         - partnerReference
         - customer
@@ -3175,6 +3730,20 @@ components:
             one of your options for this application's amount now, or the request is refused with
             422 product_unavailable naming optionId. Either way nothing is written.
           example: 3b8f2c1e-6d4a-4f7b-9a2e-5c1d8e7f6a90
+        backUrl:
+          type: string
+          maxLength: 2048
+          description: "Where the customer goes if they choose to go back to your site from the start of the
+            journey (the email code and plan pages), such as the basket they came from. An https
+            address on port 443, with `{{ref}}` at most once in the path or query, which we replace
+            with your partnerReference, URL-encoded. Its domain must be one Ideal has approved for
+            you: a partner admin submits each domain in the partner admin, and it is used only once
+            approved. A domain covers itself alone, not its subdomains. Any other address is refused
+            with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without
+            one, the link goes to your failure address, and with neither there is no link. Each
+            createApplication or issueHandoff that sends it replaces the last; one that omits it
+            leaves it as it was."
+          example: https://www.example.com/basket?order={{ref}}
       title: IssueHandoffRequest
     FulfilConflictProblem:
       type: object
@@ -3199,6 +3768,121 @@ components:
         - status
         - code
       title: FulfilConflictProblem
+    RefundConflictProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum:
+            - invalid_state
+            - refund_unavailable
+            - refund_pending
+            - idempotency_key_conflict
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: RefundConflictProblem
+    RefundAmountProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: integer
+        detail:
+          type: string
+        code:
+          type: string
+          enum:
+            - amount_exceeds_balance
+            - currency_mismatch
+        refundableBalance:
+          allOf:
+            - $ref: "#/components/schemas/Money"
+            - description: "With amount_exceeds_balance: what can be refunded now."
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: RefundAmountProblem
+    RefundRequest:
+      type: object
+      properties:
+        amount:
+          $ref: "#/components/schemas/PositiveMoney"
+        reason:
+          $ref: "#/components/schemas/RefundReason"
+      required:
+        - amount
+        - reason
+      title: RefundRequest
+      description: amount is what to refund, at most refundableBalance (listRefunds); equal to it is a
+        full refund.
+    PositiveMoney:
+      type: object
+      properties:
+        amount:
+          type: integer
+          minimum: 1
+          maximum: 1000000000
+          description: "In pence (minor units): 2345 = £23.45; at least 1, at most 1000000000 (£10,000,000.00)."
+          example: 2345
+        currency:
+          type: string
+          pattern: ^[A-Z]{3}$
+          description: ISO 4217. Only GBP is accepted for now.
+      required:
+        - amount
+        - currency
+      title: PositiveMoney
+    RefundReason:
+      type: string
+      title: RefundReason
+      description: "Your account of why. customer_withdrew: the customer told you they are withdrawing
+        from the credit agreement. service_cancelled: the service was cancelled. paid_upfront: the
+        customer paid you directly instead. partial_service: part of the service was not delivered.
+        other: none of these."
+      enum:
+        - customer_withdrew
+        - service_cancelled
+        - paid_upfront
+        - partial_service
+        - other
+    Refunds:
+      type: object
+      properties:
+        refundableBalance:
+          anyOf:
+            - $ref: "#/components/schemas/Money"
+            - type: "null"
+          description: "What can be requested now: the Quote's total including VAT, less every open request
+            and every completed refund; never below 0. null unless the application is signed,
+            fulfilled or paid_out."
+        refunds:
+          type: array
+          items:
+            $ref: "#/components/schemas/Refund"
+          maxItems: 100
+          description: Newest first, at most 100.
+      required:
+        - refundableBalance
+        - refunds
+      title: Refunds
     FinanceOptions:
       type: object
       properties:
