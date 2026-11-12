@@ -53,13 +53,13 @@
     {
       "name": "return-addresses",
       "x-displayName": "Return addresses",
-      "description": "At the end of the journey we can send the customer back to your site, to one of two addresses a\npartner admin sets in the partner admin. There is no API endpoint for them.\n\n- **Success address**: where we send a customer after they sign their credit agreement.\n- **Failure address**: where we send a customer whose application is declined.\n\nNo other ending sends the customer back, and either address may be left empty, in which case we\ndo not offer the way back for that ending. Each must be an `https` address on the standard port\n(443): no other port, and no name or password before the host.\n\n**The placeholder.** Put `{{ref}}` where your `partnerReference` goes, at most once, in the path\nor the query, never in the host. We replace it with the reference, URL-encoded, so a reference\nsuch as `PF 1/2&3` arrives as `PF%201%2F2%263`:\n\n```text\nhttps://www.example.com/finance/done?ref={{ref}}\nhttps://www.example.com/finance/done?ref=PF-12345\n```\n\nNothing else is added to the address, and nothing about the customer is put in it. A reference\nof `.` or `..` would change the address's path, so for one of those we do not offer the way back.\n\n**Arriving is not proof.** Anyone can open either address, with any reference. Confirm the\noutcome from the webhook, or with `getApplication`, before acting on it.\n\n**The back link.** At the start of the journey, on the email code and plan pages, we offer the\ncustomer a way back to your site. Send `backUrl` on `createApplication` or `issueHandoff` with\nwhere they came from, such as their basket; each one that sends it replaces the last. It follows the\nrules above, `{{ref}}` included, and its domain must be one Ideal has approved for you: a partner\nadmin submits each domain in the partner admin, and it is used only once approved.\n\n- Any https page on an approved domain can be a back link, with any path or query.\n- A domain covers itself alone: `example.com` does not cover `www.example.com` or\n  `staging.example.com`, so submit each one. There are no wildcards.\n- Any other `backUrl` is refused with `400 bad_request`, its `detail` starting `backUrl:`, and\n  nothing is written.\n\n```json\n{ \"backUrl\": \"https://www.example.com/basket?order={{ref}}\" }\n```\n\nWithout a `backUrl`, the way back goes to your failure address; with neither, none is offered.",
+      "description": "At the end of the journey we can send the customer back to your site, to one of two addresses a\npartner admin sets in the partner admin. There is no API endpoint for them. A new address is used\nonly once Ideal approves it; until then the one before stays in use.\n\n- **Success address**: where we send a customer after they sign their credit agreement.\n- **Failure address**: where we send a customer whose application is declined.\n\nNo other ending sends the customer back, and either address may be left empty, in which case we\ndo not offer the way back for that ending. Each must be an `https` address on the standard port\n(443): no other port, and no name or password before the host.\n\n**The placeholder.** Put `{{ref}}` where your `partnerReference` goes, at most once, in the path\nor the query, never in the host. We replace it with the reference, URL-encoded, so a reference\nsuch as `PF 1/2&3` arrives as `PF%201%2F2%263`:\n\n```text\nhttps://www.example.com/finance/done?ref={{ref}}\nhttps://www.example.com/finance/done?ref=PF-12345\n```\n\nNothing else is added to the address, and nothing about the customer is put in it. A reference\nof `.` or `..` would change the address's path, so for one of those we do not offer the way back.\n\n**Arriving is not proof.** Anyone can open either address, with any reference. Confirm the\noutcome from the webhook, or with `getApplication`, before acting on it.\n\n**The back link.** At the start of the journey, on the email code and plan pages, we offer the\ncustomer a way back to your site. Send `backUrl` on `createApplication` or `issueHandoff` with\nwhere they came from, such as their basket; each one that sends it replaces the last. It follows the\nrules above, `{{ref}}` included, and its domain must be one Ideal has approved for you: a partner\nadmin submits each domain in the partner admin, and it is used only once approved.\n\n- Any https page on an approved domain can be a back link, with any path or query.\n- A domain covers itself alone: `example.com` does not cover `www.example.com` or\n  `staging.example.com`, so submit each one. There are no wildcards.\n- Write the domain part in lower case. We never change the address, so a capital in the domain\n  is refused; the path and query keep their case.\n- Any other `backUrl` is refused with `400 bad_request`, its `detail` starting `backUrl:`, and\n  nothing is written.\n\n```json\n{ \"backUrl\": \"https://www.example.com/basket?order={{ref}}\" }\n```\n\nWithout a `backUrl`, the way back goes to your failure address; with neither, none is offered.",
       "x-traitTag": true
     },
     {
       "name": "errors",
       "x-displayName": "Errors",
-      "description": "Every error is `application/problem+json`:\n\n```json\n{ \"type\": \"about:blank\", \"title\": \"Conflict\", \"status\": 409, \"code\": \"email_conflict\",\n  \"detail\": \"This partnerReference belongs to a different customer.\" }\n```\n\nBranch on `status` and `code`. `title` and `detail` are written for people and may change;\n`detail` is sometimes absent.\n\n| Status | code | When |\n|---|---|---|\n| 400 | `bad_request` | The request does not match the contract. `detail` usually lists each problem in the first part of the request that fails (query, path, headers, then body) as `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param` or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse after those checks, get a sentence instead. |\n| 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP ranges. |\n| 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs (`detail` names it), or a create replay changes the quote and the key lacks `applications:amend`. Nothing was written. |\n| 404 | `not_found` | No application of yours has that id or `partnerReference`. |\n| 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict`, `refund_unavailable`, `refund_pending` | See *Idempotency and retries*, *Showing finance options at checkout* and each operation. |\n| 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`, `product_unavailable`, `amount_out_of_bounds`, `amount_exceeds_balance` | The quote is refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. `product_unavailable` naming `optionId` refuses the option sent: see *Showing finance options at checkout*. On requestRefund, `amount_exceeds_balance` (with `refundableBalance`) or `currency_mismatch` refuses the amount. |\n| 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |\n| 501 | `not_implemented` | The operation is not yet available. |\n\nEach operation lists its own responses, with an example of each.\n\n**Rate limits.** Each API key, and each calling address, may send only so many requests in a short\ntime; past that, a request is refused with `429 rate_limited` before it does anything, so it is\nalways safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at least\nthat long, then retry, backing off further if you are refused again. The limits are well above\nnormal use and may change, so do not build to a number.\n\nEvery response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us about\na request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is\nreplaced with one of ours.",
+      "description": "Every error is `application/problem+json`:\n\n```json\n{ \"type\": \"about:blank\", \"title\": \"Conflict\", \"status\": 409, \"code\": \"email_conflict\",\n  \"detail\": \"This partnerReference belongs to a different customer.\" }\n```\n\nBranch on `status` and `code`. `title` and `detail` are written for people and may change;\n`detail` is sometimes absent.\n\n| Status | code | When |\n|---|---|---|\n| 400 | `bad_request` | The request does not match the contract. `detail` usually lists each problem in the first part of the request that fails (query, path, headers, then body) as `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param` or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse after those checks, get a sentence instead. |\n| 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP ranges. |\n| 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs (`detail` names it), or a create replay changes the quote and the key lacks `applications:amend`. Nothing was written. |\n| 404 | `not_found` | No application of yours has that id or `partnerReference`. |\n| 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict`, `refund_unavailable`, `refund_pending` | See *Idempotency and retries*, *Showing finance options at checkout* and each operation. |\n| 413 | `too_large` | The body is over 1 MiB (1,048,576 bytes). Nothing was done. |\n| 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`, `product_unavailable`, `amount_out_of_bounds`, `amount_exceeds_balance` | The quote is refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. `product_unavailable` naming `optionId` refuses the option sent: see *Showing finance options at checkout*. On requestRefund, `amount_exceeds_balance` (with `refundableBalance`) or `currency_mismatch` refuses the amount. |\n| 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |\n| 501 | `not_implemented` | The operation is not yet available. |\n\nEach operation lists its own responses, with an example of each.\n\n**Rate limits.** Each API key, and each calling address, may send only so many requests in a short\ntime; past that, a request is refused with `429 rate_limited` before it does anything, so it is\nalways safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at least\nthat long, then retry, backing off further if you are refused again. The limits are well above\nnormal use and may change, so do not build to a number.\n\nEvery response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us about\na request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is\nreplaced with one of ours.",
       "x-traitTag": true
     },
     {
@@ -852,6 +852,16 @@
                       "code": "bad_request",
                       "detail": "backUrl: not an https address on a domain Ideal has approved for you, with {{ref}} at most once. Nothing was written."
                     }
+                  },
+                  "backUrlUpperCase": {
+                    "summary": "A backUrl with a capital letter in its domain",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "The request does not match the contract",
+                      "status": 400,
+                      "code": "bad_request",
+                      "detail": "backUrl: the domain part must be lower case, as Ideal approved it; the path and query keep their case. Nothing was written."
+                    }
                   }
                 },
                 "schema": {
@@ -897,6 +907,9 @@
           },
           "409": {
             "$ref": "#/components/responses/Conflict"
+          },
+          "413": {
+            "$ref": "#/components/responses/ContentTooLarge"
           },
           "422": {
             "$ref": "#/components/responses/Unprocessable"
@@ -1529,6 +1542,9 @@
               }
             }
           },
+          "413": {
+            "$ref": "#/components/responses/ContentTooLarge"
+          },
           "422": {
             "$ref": "#/components/responses/Unprocessable"
           },
@@ -1677,6 +1693,16 @@
                       "code": "bad_request",
                       "detail": "backUrl: not an https address on a domain Ideal has approved for you, with {{ref}} at most once. Nothing was written."
                     }
+                  },
+                  "backUrlUpperCase": {
+                    "summary": "A backUrl with a capital letter in its domain",
+                    "value": {
+                      "type": "about:blank",
+                      "title": "The request does not match the contract",
+                      "status": 400,
+                      "code": "bad_request",
+                      "detail": "backUrl: the domain part must be lower case, as Ideal approved it; the path and query keep their case. Nothing was written."
+                    }
                   }
                 },
                 "schema": {
@@ -1744,6 +1770,9 @@
                 }
               }
             }
+          },
+          "413": {
+            "$ref": "#/components/responses/ContentTooLarge"
           },
           "422": {
             "description": "product_unavailable when optionId is not one of your options for the application's amount now (detail names optionId). Nothing was written.",
@@ -1995,6 +2024,9 @@
               }
             }
           },
+          "413": {
+            "$ref": "#/components/responses/ContentTooLarge"
+          },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
           }
@@ -2217,6 +2249,9 @@
                 }
               }
             }
+          },
+          "413": {
+            "$ref": "#/components/responses/ContentTooLarge"
           },
           "422": {
             "description": "When no earlier 202 bound the Idempotency-Key: amount_exceeds_balance when the amount is more than can be refunded now (refundableBalance carries it), or currency_mismatch when it is not in GBP. A 422 stores nothing.",
@@ -2768,12 +2803,12 @@
           "to"
         ],
         "title": "StatusChangedEvent",
-        "description": "Status can move backwards, always to in_progress: on an amend (from submitted or approved), when Ideal returns a submitted application to the customer, and when an approved offer lapses."
+        "description": "Status can move backwards, always to in_progress: when Ideal returns a submitted application to the customer; when an approved offer lapses; when the customer leaves the lender's site before finishing, from submitted, referred or approved; and when the customer's answers are refused before a decision, from submitted. An amend does not move it: amendApplication, and createApplication with a changed quote, each say what an amend answers from each status."
       },
       "Status": {
         "type": "string",
         "title": "ApplicationStatus",
-        "description": "referred: the lender is looking more closely before it decides; approved, declined or expired follows (on QA, only under the tags in Testing on QA). A customer who leaves the lender's site before finishing returns the application from submitted, referred or approved to in_progress, to submit again; only the customer, the partner or Ideal cancels it. refunded: completed refunds have reached the Quote's total including VAT and the agreement is closed; nothing follows it. repaid: the customer has repaid the agreement in full; not yet sent. Handle every value: this set is closed.",
+        "description": "referred: the lender is looking more closely before it decides; approved, declined or expired follows (on QA, only under the tags in Testing on QA). A customer who leaves the lender's site before finishing returns the application from submitted, referred or approved to in_progress, to submit again; only the customer, the partner or Ideal cancels it. refunded: completed refunds have reached the Quote's total including VAT and the agreement is closed; nothing follows it. repaid: the customer has repaid the agreement in full; sent only where the lender reports repayment, which none yet does. Handle every value: this set is closed.",
         "enum": [
           "created",
           "in_progress",
@@ -3498,6 +3533,36 @@
         ],
         "title": "CreateConflictProblem"
       },
+      "TooLargeProblem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number",
+            "const": 413
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "too_large"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "title": "TooLargeProblem"
+      },
       "QuoteProblem": {
         "type": "object",
         "properties": {
@@ -3600,7 +3665,7 @@
           "backUrl": {
             "type": "string",
             "maxLength": 2048,
-            "description": "Where the customer goes if they choose to go back to your site from the start of the journey (the email code and plan pages), such as the basket they came from. An https address on port 443, with `{{ref}}` at most once in the path or query, which we replace with your partnerReference, URL-encoded. Its domain must be one Ideal has approved for you: a partner admin submits each domain in the partner admin, and it is used only once approved. A domain covers itself alone, not its subdomains. Any other address is refused with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without one, the link goes to your failure address, and with neither there is no link. Each createApplication or issueHandoff that sends it replaces the last; one that omits it leaves it as it was.",
+            "description": "Where the customer goes if they choose to go back to your site from the start of the journey (the email code and plan pages), such as the basket they came from. An https address on port 443, with `{{ref}}` at most once in the path or query, which we replace with your partnerReference, URL-encoded. Its domain must be one Ideal has approved for you: a partner admin submits each domain in the partner admin, and it is used only once approved. A domain covers itself alone, not its subdomains. The domain part must be lower case, as approved: we never change the address, so one with a capital in its domain is refused, and its path and query keep their case. Any other address is refused with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without one, the link goes to your failure address, and with neither there is no link. Each createApplication or issueHandoff that sends it replaces the last; one that omits it leaves it as it was.",
             "example": "https://www.example.com/basket?order={{ref}}"
           }
         },
@@ -3863,7 +3928,7 @@
           "backUrl": {
             "type": "string",
             "maxLength": 2048,
-            "description": "Where the customer goes if they choose to go back to your site from the start of the journey (the email code and plan pages), such as the basket they came from. An https address on port 443, with `{{ref}}` at most once in the path or query, which we replace with your partnerReference, URL-encoded. Its domain must be one Ideal has approved for you: a partner admin submits each domain in the partner admin, and it is used only once approved. A domain covers itself alone, not its subdomains. Any other address is refused with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without one, the link goes to your failure address, and with neither there is no link. Each createApplication or issueHandoff that sends it replaces the last; one that omits it leaves it as it was.",
+            "description": "Where the customer goes if they choose to go back to your site from the start of the journey (the email code and plan pages), such as the basket they came from. An https address on port 443, with `{{ref}}` at most once in the path or query, which we replace with your partnerReference, URL-encoded. Its domain must be one Ideal has approved for you: a partner admin submits each domain in the partner admin, and it is used only once approved. A domain covers itself alone, not its subdomains. The domain part must be lower case, as approved: we never change the address, so one with a capital in its domain is refused, and its path and query keep their case. Any other address is refused with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without one, the link goes to your failure address, and with neither there is no link. Each createApplication or issueHandoff that sends it replaces the last; one that omits it leaves it as it was.",
             "example": "https://www.example.com/basket?order={{ref}}"
           }
         },
@@ -4407,6 +4472,28 @@
             },
             "schema": {
               "$ref": "#/components/schemas/RateLimitedProblem"
+            }
+          }
+        }
+      },
+      "ContentTooLarge": {
+        "description": "too_large: the body is over 1,048,576 bytes. Nothing was done.",
+        "content": {
+          "application/problem+json": {
+            "examples": {
+              "tooLarge": {
+                "summary": "A body over the limit",
+                "value": {
+                  "type": "about:blank",
+                  "title": "Content Too Large",
+                  "status": 413,
+                  "code": "too_large",
+                  "detail": "The request is too large."
+                }
+              }
+            },
+            "schema": {
+              "$ref": "#/components/schemas/TooLargeProblem"
             }
           }
         }
