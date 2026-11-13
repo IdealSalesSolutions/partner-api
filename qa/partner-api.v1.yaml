@@ -355,7 +355,7 @@ tags:
       ```
 
 
-      Without a `backUrl`, the way back goes to your failure address; with neither, none is offered.
+      Without a `backUrl`, no way back is offered: never your failure address in its place.
     x-traitTag: true
   - name: errors
     x-displayName: Errors
@@ -3642,7 +3642,7 @@ components:
             lower case, as approved: we never change the address, so one with a capital in its
             domain is refused, and its path and query keep their case. Any other address is refused
             with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without
-            one, the link goes to your failure address, and with neither there is no link. Each
+            one there is no link: we never send the customer to your failure address instead. Each
             createApplication or issueHandoff that sends it replaces the last; one that omits it
             leaves it as it was."
           example: https://www.example.com/basket?order={{ref}}
@@ -3848,7 +3848,7 @@ components:
             lower case, as approved: we never change the address, so one with a capital in its
             domain is refused, and its path and query keep their case. Any other address is refused
             with 400 bad_request, its detail starting `backUrl:`, and nothing is written. Without
-            one, the link goes to your failure address, and with neither there is no link. Each
+            one there is no link: we never send the customer to your failure address instead. Each
             createApplication or issueHandoff that sends it replaces the last; one that omits it
             leaves it as it was."
           example: https://www.example.com/basket?order={{ref}}
