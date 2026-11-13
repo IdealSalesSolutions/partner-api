@@ -59,7 +59,7 @@
     {
       "name": "errors",
       "x-displayName": "Errors",
-      "description": "Every error is `application/problem+json`:\n\n```json\n{ \"type\": \"about:blank\", \"title\": \"Conflict\", \"status\": 409, \"code\": \"email_conflict\",\n  \"detail\": \"This partnerReference belongs to a different customer.\" }\n```\n\nBranch on `status` and `code`. `title` and `detail` are written for people and may change;\n`detail` is sometimes absent.\n\n| Status | code | When |\n|---|---|---|\n| 400 | `bad_request` | The request does not match the contract. `detail` usually lists each problem in the first part of the request that fails (query, path, headers, then body) as `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param` or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse after those checks, get a sentence instead. |\n| 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP ranges. |\n| 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs (`detail` names it), or a create replay changes the quote and the key lacks `applications:amend`. Nothing was written. |\n| 404 | `not_found` | No application of yours has that id or `partnerReference`. |\n| 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict`, `refund_unavailable`, `refund_pending` | See *Idempotency and retries*, *Showing finance options at checkout* and each operation. |\n| 413 | `too_large` | The body is over 1 MiB (1,048,576 bytes). Nothing was done. |\n| 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`, `product_unavailable`, `amount_out_of_bounds`, `amount_exceeds_balance` | The quote is refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. `product_unavailable` naming `optionId` refuses the option sent: see *Showing finance options at checkout*. On requestRefund, `amount_exceeds_balance` (with `refundableBalance`) or `currency_mismatch` refuses the amount. |\n| 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |\n| 501 | `not_implemented` | The operation is not yet available. |\n\nEach operation lists its own responses, with an example of each.\n\n**Rate limits.** Each API key, and each calling address, may send only so many requests in a short\ntime; past that, a request is refused with `429 rate_limited` before it does anything, so it is\nalways safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at least\nthat long, then retry, backing off further if you are refused again. The limits are well above\nnormal use and may change, so do not build to a number.\n\nEvery response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us about\na request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is\nreplaced with one of ours.",
+      "description": "Every error is `application/problem+json`:\n\n```json\n{ \"type\": \"about:blank\", \"title\": \"Conflict\", \"status\": 409, \"code\": \"email_conflict\",\n  \"detail\": \"This partnerReference belongs to a different customer.\" }\n```\n\nBranch on `status` and `code`. `title` and `detail` are written for people and may change;\n`detail` is sometimes absent.\n\n| Status | code | When |\n|---|---|---|\n| 400 | `bad_request` | The request does not match the contract. `detail` usually lists each problem in the first part of the request that fails (query, path, headers, then body) as `<where>.<field>: <message>`, separated by `; `, where `<where>` is `json`, `query`, `param` or `header`. A body that is not JSON, or not sent as `application/json`, and a value we refuse after those checks, get a sentence instead. |\n| 401 | `unauthorized` | The key is missing, wrong or revoked, or used from outside its IP ranges. |\n| 403 | `insufficient_scope` | The key is valid but lacks a scope the operation needs (`detail` names it), or a create replay changes the quote and the key lacks `applications:amend`. Nothing was written. |\n| 404 | `not_found` | No application of yours has that id or `partnerReference`. |\n| 409 | `email_conflict`, `details_differ`, `invalid_state`, `idempotency_key_conflict`, `refund_unavailable`, `refund_pending` | See *Idempotency and retries*, *Showing finance options at checkout* and each operation. |\n| 413 | `too_large` | The body is over 1 MiB (1,048,576 bytes). Nothing was done. |\n| 422 | `currency_mismatch`, `invalid_line_item`, `total_out_of_range`, `total_mismatch`, `product_unavailable`, `amount_out_of_bounds`, `amount_exceeds_balance` | The quote is refused: see *Money and quantities*. `invalid_line_item`'s `detail` names the item (`quote.items[0]`) and the rule. `product_unavailable` naming `optionId` refuses the option sent: see *Showing finance options at checkout*. On requestRefund, `amount_exceeds_balance` (with `refundableBalance`) or `currency_mismatch` refuses the amount. |\n| 429 | `rate_limited` | Too many requests in a short time. Nothing was done. |\n| 501 | `not_implemented` | The operation is not yet available. |\n| 503 | `service_unavailable` | We were too busy to answer in time. Wait at least `Retry-After` seconds, then retry: see *Idempotency and retries*. |\n\nEach operation lists its own responses, with an example of each.\n\n**Rate limits.** Each API key, and each calling address, may send only so many requests in a short\ntime; past that, a request is refused with `429 rate_limited` before it does anything, so it is\nalways safe to retry. The `Retry-After` header says how many whole seconds to wait. Wait at least\nthat long, then retry, backing off further if you are refused again. The limits are well above\nnormal use and may change, so do not build to a number.\n\nEvery response, an error or not, carries an `X-Request-Id` header. Quote it when you ask us about\na request. You may send your own `X-Request-Id` as a UUID and we use it; any other value is\nreplaced with one of ours.",
       "x-traitTag": true
     },
     {
@@ -916,6 +916,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       },
@@ -1094,6 +1097,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1267,6 +1273,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1571,6 +1580,9 @@
                 }
               }
             }
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -1798,6 +1810,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -2029,6 +2044,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -2291,6 +2309,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       },
@@ -2417,6 +2438,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -2589,6 +2613,9 @@
           },
           "429": {
             "$ref": "#/components/responses/TooManyRequests"
+          },
+          "503": {
+            "$ref": "#/components/responses/ServiceUnavailable"
           }
         }
       }
@@ -3639,6 +3666,36 @@
         ],
         "title": "RateLimitedProblem"
       },
+      "UnavailableProblem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "format": "uri"
+          },
+          "title": {
+            "type": "string"
+          },
+          "status": {
+            "type": "number",
+            "const": 503
+          },
+          "detail": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string",
+            "const": "service_unavailable"
+          }
+        },
+        "required": [
+          "type",
+          "title",
+          "status",
+          "code"
+        ],
+        "title": "UnavailableProblem"
+      },
       "CreateApplicationRequest": {
         "type": "object",
         "properties": {
@@ -4494,6 +4551,40 @@
             },
             "schema": {
               "$ref": "#/components/schemas/TooLargeProblem"
+            }
+          }
+        }
+      },
+      "ServiceUnavailable": {
+        "description": "service_unavailable: we were too busy to answer in time. Wait at least Retry-After seconds, then retry; see Idempotency and retries for what a retried write does.",
+        "headers": {
+          "Retry-After": {
+            "schema": {
+              "type": "string",
+              "pattern": "^[1-9][0-9]*$",
+              "description": "Whole seconds to wait before retrying.",
+              "example": "1"
+            },
+            "required": true,
+            "description": "Whole seconds to wait before retrying."
+          }
+        },
+        "content": {
+          "application/problem+json": {
+            "examples": {
+              "busy": {
+                "summary": "Too busy to answer in time; wait for Retry-After",
+                "value": {
+                  "type": "about:blank",
+                  "title": "Service Unavailable",
+                  "status": 503,
+                  "code": "service_unavailable",
+                  "detail": "We were too busy to answer in time. Wait for the time in Retry-After, then try again."
+                }
+              }
+            },
+            "schema": {
+              "$ref": "#/components/schemas/UnavailableProblem"
             }
           }
         }

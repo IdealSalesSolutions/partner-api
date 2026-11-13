@@ -411,6 +411,9 @@ tags:
 
       | 501 | `not_implemented` | The operation is not yet available. |
 
+      | 503 | `service_unavailable` | We were too busy to answer in time. Wait at least
+      `Retry-After` seconds, then retry: see *Idempotency and retries*. |
+
 
       Each operation lists its own responses, with an example of each.
 
@@ -1327,6 +1330,8 @@ paths:
           $ref: "#/components/responses/Unprocessable"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
     get:
       operationId: findApplicationByPartnerReference
       security:
@@ -1469,6 +1474,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/applications/{applicationId}:
     get:
       operationId: getApplication
@@ -1601,6 +1608,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/applications/{applicationId}/amendments:
     post:
       operationId: amendApplication
@@ -1906,6 +1915,8 @@ paths:
                     code: not_implemented
               schema:
                 $ref: "#/components/schemas/NotImplementedProblem"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/applications/{applicationId}/handoff:
     post:
       operationId: issueHandoff
@@ -2090,6 +2101,8 @@ paths:
                 $ref: "#/components/schemas/Problem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/applications/{applicationId}/fulfil:
     post:
       operationId: fulfilApplication
@@ -2292,6 +2305,8 @@ paths:
           $ref: "#/components/responses/ContentTooLarge"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/applications/{applicationId}/refunds:
     post:
       operationId: requestRefund
@@ -2531,6 +2546,8 @@ paths:
                 $ref: "#/components/schemas/RefundAmountProblem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
     get:
       operationId: listRefunds
       security:
@@ -2623,6 +2640,8 @@ paths:
           $ref: "#/components/responses/NotFound"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
   /v1/finance-options:
     get:
       operationId: listFinanceOptions
@@ -2758,6 +2777,8 @@ paths:
                 $ref: "#/components/schemas/ScopeProblem"
         "429":
           $ref: "#/components/responses/TooManyRequests"
+        "503":
+          $ref: "#/components/responses/ServiceUnavailable"
 webhooks:
   applicationEvent:
     post:
@@ -3564,6 +3585,28 @@ components:
         - status
         - code
       title: RateLimitedProblem
+    UnavailableProblem:
+      type: object
+      properties:
+        type:
+          type: string
+          format: uri
+        title:
+          type: string
+        status:
+          type: number
+          const: 503
+        detail:
+          type: string
+        code:
+          type: string
+          const: service_unavailable
+      required:
+        - type
+        - title
+        - status
+        - code
+      title: UnavailableProblem
     CreateApplicationRequest:
       type: object
       properties:
@@ -4240,3 +4283,28 @@ components:
                 detail: The request is too large.
           schema:
             $ref: "#/components/schemas/TooLargeProblem"
+    ServiceUnavailable:
+      description: "service_unavailable: we were too busy to answer in time. Wait at least Retry-After
+        seconds, then retry; see Idempotency and retries for what a retried write does."
+      headers:
+        Retry-After:
+          schema:
+            type: string
+            pattern: ^[1-9][0-9]*$
+            description: Whole seconds to wait before retrying.
+            example: "1"
+          required: true
+          description: Whole seconds to wait before retrying.
+      content:
+        application/problem+json:
+          examples:
+            busy:
+              summary: Too busy to answer in time; wait for Retry-After
+              value:
+                type: about:blank
+                title: Service Unavailable
+                status: 503
+                code: service_unavailable
+                detail: We were too busy to answer in time. Wait for the time in Retry-After, then try again.
+          schema:
+            $ref: "#/components/schemas/UnavailableProblem"
