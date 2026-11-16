@@ -2830,12 +2830,12 @@
           "to"
         ],
         "title": "StatusChangedEvent",
-        "description": "Status can move backwards, always to in_progress: when Ideal returns a submitted application to the customer; when an approved offer lapses; when the customer leaves the lender's site before finishing, from submitted, referred or approved; and when the customer's answers are refused before a decision, from submitted. An amend does not move it: amendApplication, and createApplication with a changed quote, each say what an amend answers from each status."
+        "description": "Status can move backwards. To in_progress: when Ideal returns a submitted application to the customer; when an approved offer lapses; when the customer leaves the lender's site before finishing, from submitted, referred or approved; and when the customer's answers are refused before a decision, from submitted. To submitted, from referred: when the lender approves at a rate you do not offer, Ideal refuses that approval, nothing is shown to the customer, and the application is with Ideal. An amend does not move it: amendApplication, and createApplication with a changed quote, each say what an amend answers from each status."
       },
       "Status": {
         "type": "string",
         "title": "ApplicationStatus",
-        "description": "referred: the lender is looking more closely before it decides; approved, declined or expired follows (on QA, only under the tags in Testing on QA). A customer who leaves the lender's site before finishing returns the application from submitted, referred or approved to in_progress, to submit again; only the customer, the partner or Ideal cancels it. refunded: completed refunds have reached the Quote's total including VAT and the agreement is closed; nothing follows it. repaid: the customer has repaid the agreement in full; sent only where the lender reports repayment, which none yet does. Handle every value: this set is closed.",
+        "description": "referred: the lender is looking more closely before it decides; approved, declined or expired follows (on QA, only under the tags in Testing on QA), or submitted again when Ideal refuses the lender's approval because it is at a rate you do not offer, which leaves the application with Ideal. A customer who leaves the lender's site before finishing returns the application from submitted, referred or approved to in_progress, to submit again; only the customer, the partner or Ideal cancels it. refunded: completed refunds have reached the Quote's total including VAT and the agreement is closed; nothing follows it. repaid: the customer has repaid the agreement in full; sent only where the lender reports repayment, which none yet does. Handle every value: this set is closed.",
         "enum": [
           "created",
           "in_progress",
